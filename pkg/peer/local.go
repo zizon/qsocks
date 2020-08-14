@@ -14,7 +14,7 @@ type LocalPeer interface {
 
 // LocalPeerConfig config for local peer
 type LocalPeerConfig struct {
-	addr string
+	Addr string
 }
 
 type localPeer struct {
@@ -23,7 +23,7 @@ type localPeer struct {
 
 // NewLocalPeer create new local endpoint
 func NewLocalPeer(ctx context.Context, config LocalPeerConfig) (LocalPeer, error) {
-	listener, err := net.Listen("tcp", config.addr)
+	listener, err := net.Listen("tcp", config.Addr)
 	if err != nil {
 		return nil, err
 	}

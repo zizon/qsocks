@@ -8,7 +8,7 @@ import (
 	quic "github.com/lucas-clemente/quic-go"
 )
 
-const (
+var (
 	// PeerQuicProtocol quic peer protocl
 	PeerQuicProtocol = []string{"quic-peer"}
 )
@@ -23,7 +23,7 @@ type RemotePeer interface {
 // RemotePeerConfig config for create new remote peer
 type RemotePeerConfig struct {
 	quic.Config
-	addr string
+	Addr string
 }
 
 type remotePeer struct {
@@ -33,7 +33,7 @@ type remotePeer struct {
 // NewRemotePeer create new remote peer
 func NewRemotePeer(ctx context.Context, config RemotePeerConfig) (RemotePeer, error) {
 	session, err := quic.DialAddrContext(
-		ctx, config.addr,
+		ctx, config.Addr,
 		&tls.Config{
 			InsecureSkipVerify: true,
 			NextProtos:         PeerQuicProtocol,
