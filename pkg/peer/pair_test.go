@@ -3,54 +3,43 @@ package peer
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"testing"
 
 	quic "github.com/lucas-clemente/quic-go"
 )
 
-type quicListener struct{}
+type quicCollector struct{}
 
-func (l quicListener) OnLocalEnpointError(err error) {
+func (l quicCollector) Collect(err error) {
 	fmt.Errorf("local endpoint error:%v", err)
-}
-func (l quicListener) OnRemoteEnpointError(err error) {
-	fmt.Errorf("remote endpoint error:%v", err)
-}
-func (l quicListener) OnTunnuelingError(err error) {
-	fmt.Errorf("tunnel  error:%v", err)
-}
-func (l quicListener) OnTunnelEnd(send int64) {
-	fmt.Errorf("tunnel end,read:%v", send)
 }
 
 func TestPair(t *testing.T) {
-	localConfig := LocalPeerConfig{
-		Addr: "localhost:10087",
-	}
-	remoteConfig := RemotePeerConfig{
-		Addr: "localhost:10088",
+	config := PairConfig{
+		LocalPeerConfig: LocalPeerConfig{
+			Addr: "localhost:10087",
+		},
+
+		RemotePeerConfig: RemotePeerConfig{
+			Addr: "localhost:10088",
+		},
+		Collector: quicCollector{},
 	}
 
 	lquic, err := quic.ListenAddr(
-		remoteConfig.Addr,
+		config.RemotePeerConfig.Addr,
 		generateTLSConfig(),
 		nil,
 	)
 	if err != nil {
-		t.Errorf("fail to listen quic:%v reason:%v", localConfig, err)
+		t.Errorf("fail to listen quic:%v reason:%v", config.LocalPeerConfig, err)
 	}
-	t.Logf("start quic server:%v", remoteConfig)
+	t.Logf("start quic server:%v", config.RemotePeerConfig)
 
 	ctx := context.TODO()
-	pairCancel, err := Pair(ctx, localConfig, remoteConfig, &quicListener{})
+	pairCancel, err := Pair(ctx, config)
 	if err != nil {
 		t.Errorf("fail to start pairing, reason:%v", err)
 	}
@@ -60,11 +49,11 @@ func TestPair(t *testing.T) {
 	c := make(chan bool)
 	go startQuicServer(ctx, lquic, t, check, c)
 
-	conn, err := net.Dial("tcp", localConfig.Addr)
+	conn, err := net.Dial("tcp", config.LocalPeerConfig.Addr)
 	if err != nil {
-		t.Errorf("fail to connect local endpoint:%v", localConfig.Addr)
+		t.Errorf("fail to connect local endpoint:%v", config.LocalPeerConfig.Addr)
 	}
-	t.Logf("connect to local:%v", localConfig)
+	t.Logf("connect to local:%v", config.LocalPeerConfig)
 
 	n, err := conn.Write(check)
 	if err != nil {
@@ -103,27 +92,4 @@ func startQuicServer(ctx context.Context, lquic quic.Listener, t *testing.T, che
 	stream.Close()
 
 	c <- true
-}
-
-func generateTLSConfig() *tls.Config {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	if err != nil {
-		panic(err)
-	}
-	template := x509.Certificate{SerialNumber: big.NewInt(1)}
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
-	if err != nil {
-		panic(err)
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-
-	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		panic(err)
-	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		NextProtos:   PeerQuicProtocol,
-	}
 }

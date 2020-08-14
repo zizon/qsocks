@@ -5,30 +5,21 @@ import (
 	"io"
 )
 
-// PairListener to receive various status
-type PairListener interface {
-	OnLocalEnpointError(error)
-	OnRemoteEnpointError(error)
-	OnTunnuelingError(error)
-	OnTunnelEnd(int64)
-}
-
-type pairContext struct {
-	context.Context
-	localPeer  LocalPeer
-	remotePeer RemotePeer
-	listener   PairListener
+type PairConfig struct {
+	LocalPeerConfig
+	RemotePeerConfig
+	Collector ContextErrorAggregator
 }
 
 // Pair pare local and remote peer
-func Pair(ctx context.Context, local LocalPeerConfig, remote RemotePeerConfig, listener PairListener) (context.CancelFunc, error) {
+func Pair(ctx context.Context, pairConfig PairConfig) (context.CancelFunc, error) {
 	pairCtx, canceler := context.WithCancel(ctx)
-	localPeer, err := NewLocalPeer(pairCtx, local)
+	localPeer, err := NewLocalPeer(pairCtx, pairConfig.LocalPeerConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	remotePeer, err := NewRemotePeer(pairCtx, remote)
+	remotePeer, err := NewRemotePeer(pairCtx, pairConfig.RemotePeerConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -37,25 +28,32 @@ func Pair(ctx context.Context, local LocalPeerConfig, remote RemotePeerConfig, l
 		pairCtx,
 		localPeer,
 		remotePeer,
-		listener,
+		pairConfig.Collector,
 	})
 
 	return canceler, nil
+}
+
+type pairContext struct {
+	context.Context
+	localPeer  LocalPeer
+	remotePeer RemotePeer
+	collector  ContextErrorAggregator
 }
 
 func serve(ctx pairContext) {
 	pairCtx := ctx.Context
 	localPeer := ctx.localPeer
 	remotePeer := ctx.remotePeer
-	listener := ctx.listener
+	collector := ctx.collector
 
 	defer func() {
 		if err := localPeer.Close(); err != nil {
-			listener.OnLocalEnpointError(err)
+			collector.Collect(err)
 		}
 
 		if err := remotePeer.Close(); err != nil {
-			listener.OnRemoteEnpointError(err)
+			collector.Collect(err)
 		}
 	}()
 
@@ -63,7 +61,7 @@ func serve(ctx pairContext) {
 		select {
 		case <-pairCtx.Done():
 			if pairCtx.Err() != nil {
-				listener.OnTunnuelingError(pairCtx.Err())
+				collector.Collect(pairCtx.Err())
 			}
 
 			break
@@ -73,18 +71,18 @@ func serve(ctx pairContext) {
 		// for local endpoint
 		in, err := localPeer.PollNewChannel(pairCtx)
 		if err != nil {
-			listener.OnLocalEnpointError(err)
+			collector.Collect(err)
 			break
 		}
 
 		// for remote endpoint
 		out, err := remotePeer.NewChannel(pairCtx)
 		if err != nil {
-			listener.OnRemoteEnpointError(err)
+			collector.Collect(err)
 
 			// close local
 			if err = in.Close(); err != nil {
-				listener.OnRemoteEnpointError(err)
+				collector.Collect(err)
 			}
 
 			continue
@@ -94,20 +92,19 @@ func serve(ctx pairContext) {
 		go func() {
 			defer func() {
 				if err := in.Close(); err != nil {
-					listener.OnLocalEnpointError(err)
+					collector.Collect(err)
 				}
 
 				if err := out.Close(); err != nil {
-					listener.OnRemoteEnpointError(err)
+					collector.Collect(err)
 				}
 			}()
 
-			n, err := io.Copy(out, in)
+			// TODO
+			_, err := io.Copy(out, in)
 			if err != nil {
-				listener.OnTunnuelingError(err)
+				collector.Collect(err)
 			}
-
-			listener.OnTunnelEnd(n)
 		}()
 	}
 }
