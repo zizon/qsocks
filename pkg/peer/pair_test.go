@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net"
 	"testing"
-
-	quic "github.com/lucas-clemente/quic-go"
 )
 
 type quicCollector struct{}
@@ -17,7 +15,7 @@ func (l quicCollector) Collect(err error) {
 }
 
 func TestPair(t *testing.T) {
-	config := PairConfig{
+	pairConfig := PairConfig{
 		LocalPeerConfig: LocalPeerConfig{
 			Addr: "localhost:10087",
 		},
@@ -25,71 +23,57 @@ func TestPair(t *testing.T) {
 		RemotePeerConfig: RemotePeerConfig{
 			Addr: "localhost:10088",
 		},
-		Collector: quicCollector{},
+		ContextErrorAggregator: quicCollector{},
 	}
 
-	lquic, err := quic.ListenAddr(
-		config.RemotePeerConfig.Addr,
-		generateTLSConfig(),
-		nil,
-	)
+	ctx, cancler := context.WithCancel(context.TODO())
+	server, err := NewServerPeer(ctx, ServerPeerConfig{
+		Addr:                   pairConfig.RemotePeerConfig.Addr,
+		ContextErrorAggregator: pairConfig.ContextErrorAggregator,
+	})
 	if err != nil {
-		t.Errorf("fail to listen quic:%v reason:%v", config.LocalPeerConfig, err)
+		t.Errorf("fail to start quic server,reason:%v", err)
 	}
-	t.Logf("start quic server:%v", config.RemotePeerConfig)
 
-	ctx := context.TODO()
-	pairCancel, err := Pair(ctx, config)
+	if err := Pair(ctx, pairConfig); err != nil {
+		t.Errorf("fail to start local peer,reason:%v config:%v", err, pairConfig)
+	}
+
+	conn, err := net.Dial("tcp", pairConfig.LocalPeerConfig.Addr)
 	if err != nil {
-		t.Errorf("fail to start pairing, reason:%v", err)
+		t.Errorf("fail to connect local endpoint:%v", pairConfig.LocalPeerConfig.Addr)
 	}
 
 	check := []byte("hello kitty")
+	// write out
+	go func() {
+		n, err := conn.Write(check)
+		if err != nil {
+			t.Errorf("fail to write to conn:%v reason%v", conn, err)
+		}
 
-	c := make(chan bool)
-	go startQuicServer(ctx, lquic, t, check, c)
+		if n != len(check) {
+			t.Errorf("fail to write to remote,expect write:%v but wrote:%v", len(check), n)
+		}
+	}()
 
-	conn, err := net.Dial("tcp", config.LocalPeerConfig.Addr)
-	if err != nil {
-		t.Errorf("fail to connect local endpoint:%v", config.LocalPeerConfig.Addr)
-	}
-	t.Logf("connect to local:%v", config.LocalPeerConfig)
+	// read in
+	go func() {
+		defer cancler()
+		remote, err := server.PollNewChannel()
+		if err != nil {
+			t.Errorf("fail to accept quic channel,reason:%v", err)
+		}
 
-	n, err := conn.Write(check)
-	if err != nil {
-		t.Errorf("fail to write to conn:%v reason%v", conn, err)
-	}
-	t.Logf("wait for response... write:%v", n)
-	<-c
-	pairCancel()
-}
+		buf := make([]byte, len(check))
+		if _, err := remote.Read(buf); err != nil {
+			t.Errorf("fail to read input quic")
+		}
 
-func startQuicServer(ctx context.Context, lquic quic.Listener, t *testing.T, check []byte, c chan bool) {
-	session, err := lquic.Accept(ctx)
-	t.Logf("receive session:%v", session)
-	if err != nil {
-		t.Errorf("fail to accept quic session, reason:%v", err)
-	}
+		if !bytes.Equal(check, buf) {
+			t.Errorf("receive not match, expected:%v got:%v", check, buf)
+		}
+	}()
 
-	stream, err := session.AcceptStream(ctx)
-	t.Logf("accept quic stream:%v", stream)
-
-	if err != nil {
-		t.Errorf("fail to accept quic srream, reason:%v", err)
-	}
-
-	buf := make([]byte, len(check))
-	n, err := stream.Read(buf)
-	if err != nil {
-		t.Errorf("fail to read quic stream")
-	}
-
-	if n != len(check) || !bytes.Equal(check, buf) {
-		t.Errorf("receive bytes not match, expected:%s, got:%s", check, buf)
-	}
-
-	t.Log("receive match")
-	stream.Close()
-
-	c <- true
+	<-ctx.Done()
 }

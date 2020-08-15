@@ -9,16 +9,18 @@ import (
 // LocalPeer for local enpoint
 type LocalPeer interface {
 	io.Closer
-	PollNewChannel(ctx context.Context) (io.ReadWriteCloser, error)
+	PollNewChannel() (io.ReadWriteCloser, error)
 }
 
 // LocalPeerConfig config for local peer
 type LocalPeerConfig struct {
 	Addr string
+	ContextErrorAggregator
 }
 
 type localPeer struct {
-	listener net.Listener
+	context.Context
+	net.Listener
 }
 
 // NewLocalPeer create new local endpoint
@@ -28,13 +30,24 @@ func NewLocalPeer(ctx context.Context, config LocalPeerConfig) (LocalPeer, error
 		return nil, err
 	}
 
+	// associate context
+	go func() {
+		if block := ctx.Done(); block != nil {
+			<-block
+			if err := listener.Close(); err != nil {
+				config.Collect(err)
+			}
+		}
+	}()
+
 	return &localPeer{
-		listener: listener,
+		ctx,
+		listener,
 	}, nil
 }
 
-func (peer localPeer) PollNewChannel(ctx context.Context) (io.ReadWriteCloser, error) {
-	return peer.listener.Accept()
+func (peer localPeer) PollNewChannel() (io.ReadWriteCloser, error) {
+	return peer.Accept()
 }
 
 func (peer localPeer) Close() error {

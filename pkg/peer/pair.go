@@ -5,84 +5,81 @@ import (
 	"io"
 )
 
+// PairConfig config for paring
 type PairConfig struct {
 	LocalPeerConfig
 	RemotePeerConfig
-	Collector ContextErrorAggregator
+	ContextErrorAggregator
+}
+
+type pairing struct {
+	context.Context
+	LocalPeer
+	RemotePeer
+	ContextErrorAggregator
 }
 
 // Pair pare local and remote peer
-func Pair(ctx context.Context, pairConfig PairConfig) (context.CancelFunc, error) {
-	pairCtx, canceler := context.WithCancel(ctx)
+func Pair(pairCtx context.Context, pairConfig PairConfig) error {
 	localPeer, err := NewLocalPeer(pairCtx, pairConfig.LocalPeerConfig)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	remotePeer, err := NewRemotePeer(pairCtx, pairConfig.RemotePeerConfig)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	go serve(pairContext{
+	paring := pairing{
 		pairCtx,
 		localPeer,
 		remotePeer,
-		pairConfig.Collector,
-	})
+		pairConfig,
+	}
 
-	return canceler, nil
-}
+	go paring.serve()
 
-type pairContext struct {
-	context.Context
-	localPeer  LocalPeer
-	remotePeer RemotePeer
-	collector  ContextErrorAggregator
-}
-
-func serve(ctx pairContext) {
-	pairCtx := ctx.Context
-	localPeer := ctx.localPeer
-	remotePeer := ctx.remotePeer
-	collector := ctx.collector
-
-	defer func() {
-		if err := localPeer.Close(); err != nil {
-			collector.Collect(err)
-		}
-
-		if err := remotePeer.Close(); err != nil {
-			collector.Collect(err)
+	go func() {
+		if block := pairCtx.Done(); block != nil {
+			defer paring.Close()
+			<-block
 		}
 	}()
+	return nil
+}
 
+func (peer pairing) Close() {
+	if err := peer.LocalPeer.Close(); err != nil {
+		peer.Collect(err)
+	}
+
+	if err := peer.RemotePeer.Close(); err != nil {
+		peer.Collect(err)
+	}
+}
+
+func (peer pairing) serve() {
+	defer peer.Close()
+
+	localPeer := peer.LocalPeer
+	remotePeer := peer.RemotePeer
 	for {
-		select {
-		case <-pairCtx.Done():
-			if pairCtx.Err() != nil {
-				collector.Collect(pairCtx.Err())
-			}
-
-			break
-		default:
-		}
-
 		// for local endpoint
-		in, err := localPeer.PollNewChannel(pairCtx)
+		in, err := localPeer.PollNewChannel()
 		if err != nil {
-			collector.Collect(err)
+			peer.Collect(err)
 			break
 		}
 
 		// for remote endpoint
-		out, err := remotePeer.NewChannel(pairCtx)
+		out, err := remotePeer.NewChannel()
 		if err != nil {
-			collector.Collect(err)
+			peer.Collect(err)
 
 			// close local
 			if err = in.Close(); err != nil {
-				collector.Collect(err)
+				peer.Collect(err)
 			}
 
 			continue
@@ -92,18 +89,18 @@ func serve(ctx pairContext) {
 		go func() {
 			defer func() {
 				if err := in.Close(); err != nil {
-					collector.Collect(err)
+					peer.Collect(err)
 				}
 
 				if err := out.Close(); err != nil {
-					collector.Collect(err)
+					peer.Collect(err)
 				}
 			}()
 
 			// TODO
 			_, err := io.Copy(out, in)
 			if err != nil {
-				collector.Collect(err)
+				peer.Collect(err)
 			}
 		}()
 	}
