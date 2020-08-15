@@ -51,5 +51,5 @@ func (peer localPeer) PollNewChannel() (io.ReadWriteCloser, error) {
 }
 
 func (peer localPeer) Close() error {
-	return peer.Close()
+	return peer.Listener.Close()
 }

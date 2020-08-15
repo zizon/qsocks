@@ -5,13 +5,21 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
+	"runtime"
 	"testing"
 )
 
 type quicCollector struct{}
 
 func (l quicCollector) Collect(err error) {
-	fmt.Errorf("local endpoint error:%v", err)
+	switch err {
+	case context.Canceled:
+		return
+	}
+	buf := make([]byte, 1024)
+	runtime.Stack(buf, false)
+	fmt.Printf("collect error: %s:%v\n%s\n", reflect.TypeOf(err), err, buf)
 }
 
 func TestPair(t *testing.T) {
@@ -26,7 +34,10 @@ func TestPair(t *testing.T) {
 		ContextErrorAggregator: quicCollector{},
 	}
 
+	// root context
 	ctx, cancler := context.WithCancel(context.TODO())
+
+	// start server
 	server, err := NewServerPeer(ctx, ServerPeerConfig{
 		Addr:                   pairConfig.RemotePeerConfig.Addr,
 		ContextErrorAggregator: pairConfig.ContextErrorAggregator,
@@ -35,10 +46,12 @@ func TestPair(t *testing.T) {
 		t.Errorf("fail to start quic server,reason:%v", err)
 	}
 
+	// start paring
 	if err := Pair(ctx, pairConfig); err != nil {
 		t.Errorf("fail to start local peer,reason:%v config:%v", err, pairConfig)
 	}
 
+	// initialize connection
 	conn, err := net.Dial("tcp", pairConfig.LocalPeerConfig.Addr)
 	if err != nil {
 		t.Errorf("fail to connect local endpoint:%v", pairConfig.LocalPeerConfig.Addr)

@@ -17,50 +17,60 @@ type pairing struct {
 	LocalPeer
 	RemotePeer
 	ContextErrorAggregator
+	context.CancelFunc
 }
 
 // Pair pare local and remote peer
-func Pair(pairCtx context.Context, pairConfig PairConfig) error {
+func Pair(ctx context.Context, pairConfig PairConfig) error {
+	// have derived goroutine,make new root context
+	pairCtx, cancler := context.WithCancel(ctx)
+
+	// calibrate error collector
+	pairConfig.LocalPeerConfig.ContextErrorAggregator = pairConfig.ContextErrorAggregator
+	pairConfig.RemotePeerConfig.ContextErrorAggregator = pairConfig.ContextErrorAggregator
+
+	// listener local
 	localPeer, err := NewLocalPeer(pairCtx, pairConfig.LocalPeerConfig)
 	if err != nil {
+		cancler()
 		return err
 	}
 
+	// connect remote
 	remotePeer, err := NewRemotePeer(pairCtx, pairConfig.RemotePeerConfig)
 	if err != nil {
+		cancler()
 		return err
 	}
 
-	paring := pairing{
+	// prepare
+	pairing := pairing{
 		pairCtx,
 		localPeer,
 		remotePeer,
 		pairConfig,
+		cancler,
 	}
 
-	go paring.serve()
+	// go serve
+	go pairing.serve()
 
 	go func() {
-		if block := pairCtx.Done(); block != nil {
-			defer paring.Close()
+		if block := pairCtx.Done(); pairCtx != nil {
 			<-block
+			cancler()
+
+			// since resource are managed by local & remote peer
+			// which associated with pairCtx, so just calling cancler
+			// should be sufficient to clanup usage
 		}
 	}()
+
 	return nil
 }
 
-func (peer pairing) Close() {
-	if err := peer.LocalPeer.Close(); err != nil {
-		peer.Collect(err)
-	}
-
-	if err := peer.RemotePeer.Close(); err != nil {
-		peer.Collect(err)
-	}
-}
-
 func (peer pairing) serve() {
-	defer peer.Close()
+	defer peer.CancelFunc()
 
 	localPeer := peer.LocalPeer
 	remotePeer := peer.RemotePeer

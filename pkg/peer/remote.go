@@ -68,6 +68,7 @@ func (peer remotePeer) NewChannel() (io.ReadWriteCloser, error) {
 
 	return stream, nil
 }
+
 func (peer remotePeer) Close() error {
 	return peer.Close()
 }

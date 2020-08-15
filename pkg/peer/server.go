@@ -31,6 +31,7 @@ type serverPeer struct {
 	quic.Listener
 	streams chan quic.Stream
 	ContextErrorAggregator
+	context.CancelFunc
 }
 
 func generateTLSConfig() *tls.Config {
@@ -67,19 +68,31 @@ func NewServerPeer(ctx context.Context, serverPeerConfig ServerPeerConfig) (Serv
 		return nil, err
 	}
 
+	quicCtx, cancler := context.WithCancel(ctx)
 	peer := serverPeer{
-		ctx,
+		quicCtx,
 		lquic,
 		make(chan quic.Stream),
 		serverPeerConfig,
+		cancler,
 	}
 
 	go peer.serveQuic()
 
 	go func() {
 		if block := peer.Done(); block != nil {
-			defer peer.Close()
 			<-block
+
+			// trigger quic listener cleanup
+			cancler()
+
+			// then close listener
+			if err := peer.Listener.Close(); err != nil {
+				peer.Collect(err)
+			}
+
+			// then close channel
+			close(peer.streams)
 		}
 	}()
 	return peer, nil
@@ -93,7 +106,7 @@ type peerSession struct {
 }
 
 func (peer serverPeer) serveQuic() {
-	defer peer.Close()
+	defer peer.CancelFunc()
 
 	for {
 		session, err := peer.Accept(peer.Context)
@@ -111,26 +124,7 @@ func (peer serverPeer) serveQuic() {
 	}
 }
 
-// Close close server peer
-func (peer serverPeer) Close() error {
-	close(peer.streams)
-
-	if err := peer.Listener.Close(); err != nil {
-		peer.Collect(err)
-	}
-
-	return nil
-}
-
-func (session peerSession) Close() {
-	if err := session.CloseWithError(0, "close"); err != nil {
-		session.Collect(err)
-	}
-}
-
 func (session peerSession) serveQuicSession() {
-	defer session.Close()
-
 	for {
 		select {
 		case <-session.Done():
@@ -149,9 +143,17 @@ func (session peerSession) serveQuicSession() {
 
 		session.streams <- stream
 	}
+
+	if err := session.CloseWithError(0, "close"); err != nil {
+		session.Collect(err)
+	}
 }
 
 // PollNewChannel poll a new channel
 func (peer serverPeer) PollNewChannel() (io.ReadWriteCloser, error) {
-	return <-peer.streams, nil
+	stream, ok := <-peer.streams
+	if ok {
+		return stream, nil
+	}
+	return nil, context.Canceled
 }
