@@ -30,17 +30,19 @@ func NewLocalPeer(ctx context.Context, config LocalPeerConfig) (LocalPeer, error
 		return nil, err
 	}
 
-	// associate context
+	lCtx, cancler := context.WithCancel(ctx)
 	go func() {
-		if block := ctx.Done(); block != nil {
+		if block := lCtx.Done(); block != nil {
 			<-block
+			cancler()
+
 			if err := listener.Close(); err != nil {
 				config.Collect(err)
 			}
 		}
 	}()
 
-	return &localPeer{
+	return localPeer{
 		ctx,
 		listener,
 	}, nil

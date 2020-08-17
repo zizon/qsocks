@@ -34,8 +34,9 @@ type remotePeer struct {
 
 // NewRemotePeer create new remote peer
 func NewRemotePeer(ctx context.Context, config RemotePeerConfig) (RemotePeer, error) {
+	rCtx, cancler := context.WithCancel(ctx)
 	session, err := quic.DialAddrContext(
-		ctx, config.Addr,
+		rCtx, config.Addr,
 		&tls.Config{
 			InsecureSkipVerify: true,
 			NextProtos:         PeerQuicProtocol,
@@ -46,15 +47,17 @@ func NewRemotePeer(ctx context.Context, config RemotePeerConfig) (RemotePeer, er
 	}
 
 	go func() {
-		if block := ctx.Done(); block != nil {
+		if block := rCtx.Done(); block != nil {
 			<-block
+			cancler()
+
 			if err := session.CloseWithError(0, "closed"); err != nil {
 				config.Collect(err)
 			}
 		}
 	}()
 
-	return &remotePeer{
+	return remotePeer{
 		session,
 		ctx,
 	}, nil

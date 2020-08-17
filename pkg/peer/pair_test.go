@@ -79,7 +79,7 @@ func TestPair(t *testing.T) {
 		}
 
 		buf := make([]byte, len(check))
-		if _, err := remote.Read(buf); err != nil {
+		if _, err := remote.Read(buf[:]); err != nil {
 			t.Errorf("fail to read input quic")
 		}
 

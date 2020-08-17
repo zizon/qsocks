@@ -56,7 +56,7 @@ func Pair(ctx context.Context, pairConfig PairConfig) error {
 	go pairing.serve()
 
 	go func() {
-		if block := pairCtx.Done(); pairCtx != nil {
+		if block := pairing.Done(); block != nil {
 			<-block
 			cancler()
 
@@ -95,9 +95,13 @@ func (peer pairing) serve() {
 			continue
 		}
 
-		// tunnel
+		ioCtx, cancler := context.WithCancel(peer)
+		go BiCopy(ioCtx, peer, in, out)
 		go func() {
-			defer func() {
+			if block := ioCtx.Done(); block != nil {
+				<-block
+				cancler()
+
 				if err := in.Close(); err != nil {
 					peer.Collect(err)
 				}
@@ -105,13 +109,24 @@ func (peer pairing) serve() {
 				if err := out.Close(); err != nil {
 					peer.Collect(err)
 				}
-			}()
-
-			// TODO
-			_, err := io.Copy(out, in)
-			if err != nil {
-				peer.Collect(err)
 			}
 		}()
 	}
+}
+
+// BiCopy copy bidirectional for both first and second
+func BiCopy(ctx context.Context, collector ContextErrorAggregator, first io.ReadWriteCloser, second io.ReadWriteCloser) {
+	// copy first -> second
+	go func() {
+		if _, err := io.Copy(second, first); err != nil {
+			collector.Collect(err)
+		}
+	}()
+
+	// copy second -> first
+	go func() {
+		if _, err := io.Copy(first, second); err != nil {
+			collector.Collect(err)
+		}
+	}()
 }
