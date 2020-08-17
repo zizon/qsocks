@@ -1,7 +1,6 @@
 package peer
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -15,7 +14,6 @@ import (
 
 // ServerPeer server side of quic peering
 type ServerPeer interface {
-	io.Closer
 	PollNewChannel() (io.ReadWriteCloser, error)
 }
 
@@ -23,15 +21,17 @@ type ServerPeer interface {
 type ServerPeerConfig struct {
 	quic.Config
 	Addr string
-	ContextErrorAggregator
+}
+
+type peerStream struct {
+	CanclableContext
+	io.ReadWriteCloser
 }
 
 type serverPeer struct {
-	context.Context
+	CanclableContext
 	quic.Listener
-	streams chan quic.Stream
-	ContextErrorAggregator
-	context.CancelFunc
+	streamC chan peerStream
 }
 
 func generateTLSConfig() *tls.Config {
@@ -58,7 +58,7 @@ func generateTLSConfig() *tls.Config {
 }
 
 // NewServerPeer create new server side peer
-func NewServerPeer(ctx context.Context, serverPeerConfig ServerPeerConfig) (ServerPeer, error) {
+func NewServerPeer(ctx CanclableContext, serverPeerConfig ServerPeerConfig) (ServerPeer, error) {
 	lquic, err := quic.ListenAddr(
 		serverPeerConfig.Addr,
 		generateTLSConfig(),
@@ -68,92 +68,91 @@ func NewServerPeer(ctx context.Context, serverPeerConfig ServerPeerConfig) (Serv
 		return nil, err
 	}
 
-	quicCtx, cancler := context.WithCancel(ctx)
-	peer := serverPeer{
-		quicCtx,
+	serverPeer := serverPeer{
+		ctx.Derive(nil),
 		lquic,
-		make(chan quic.Stream),
-		serverPeerConfig,
-		cancler,
+		make(chan peerStream),
 	}
 
-	go peer.serveQuic()
+	go serverPeer.serveQuic()
 
-	go func() {
-		if block := peer.Done(); block != nil {
-			<-block
-
-			// trigger quic listener cleanup
-			cancler()
-
-			// then close listener
-			if err := peer.Listener.Close(); err != nil {
-				peer.Collect(err)
-			}
-
-			// then close channel
-			close(peer.streams)
+	serverPeer.Cleancup(func() {
+		if err := lquic.Close(); err != nil {
+			serverPeer.CollectError(err)
 		}
-	}()
-	return peer, nil
+
+		close(serverPeer.streamC)
+	})
+
+	return serverPeer, nil
+}
+
+func (server serverPeer) serveQuic() {
+	defer server.Cancle()
+
+	for {
+		session, err := server.Accept(server)
+		if err != nil {
+			server.CollectError(err)
+			break
+		}
+
+		sessionCtx := server.Derive(nil)
+		go peerSession{
+			sessionCtx,
+			session,
+			server.streamC,
+		}.serveQuicSession()
+
+		sessionCtx.Cleancup(func() {
+			if err := session.CloseWithError(0, "close"); err != nil {
+				server.CollectError(err)
+			}
+		})
+	}
 }
 
 type peerSession struct {
+	CanclableContext
 	quic.Session
-	context.Context
-	streams chan quic.Stream
-	ContextErrorAggregator
-}
-
-func (peer serverPeer) serveQuic() {
-	defer peer.CancelFunc()
-
-	for {
-		session, err := peer.Accept(peer.Context)
-		if err != nil {
-			peer.Collect(err)
-			break
-		}
-
-		go peerSession{
-			session,
-			peer.Context,
-			peer.streams,
-			peer,
-		}.serveQuicSession()
-	}
+	streamC chan peerStream
 }
 
 func (session peerSession) serveQuicSession() {
+	defer session.Cancle()
+
 	for {
-		select {
-		case <-session.Done():
-			if err := session.Context.Err(); err != nil {
-				session.Collect(err)
-			}
-			break
-		default:
-		}
-
-		stream, err := session.AcceptStream(session.Context)
+		stream, err := session.AcceptStream(session)
 		if err != nil {
-			session.Collect(err)
+			session.CollectError(err)
 			break
 		}
 
-		session.streams <- stream
-	}
+		streamCtx := session.Derive(nil)
+		session.streamC <- peerStream{
+			streamCtx,
+			stream,
+		}
 
-	if err := session.CloseWithError(0, "close"); err != nil {
-		session.Collect(err)
+		streamCtx.Cleancup(func() {
+			if err := stream.Close(); err != nil {
+				session.CollectError(err)
+			}
+		})
 	}
 }
 
 // PollNewChannel poll a new channel
-func (peer serverPeer) PollNewChannel() (io.ReadWriteCloser, error) {
-	stream, ok := <-peer.streams
+func (server serverPeer) PollNewChannel() (io.ReadWriteCloser, error) {
+	stream, ok := <-server.streamC
 	if ok {
 		return stream, nil
 	}
-	return nil, context.Canceled
+
+	return nil, server.Err()
+}
+
+func (stream peerStream) Close() error {
+	stream.Cancle()
+	return stream.ReadWriteCloser.Close()
 }

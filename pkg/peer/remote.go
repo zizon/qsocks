@@ -1,7 +1,6 @@
 package peer
 
 import (
-	"context"
 	"crypto/tls"
 	"io"
 
@@ -15,7 +14,6 @@ var (
 
 // RemotePeer remote peer fo quic channel
 type RemotePeer interface {
-	io.Closer
 	// create new channel to remote
 	NewChannel() (io.ReadWriteCloser, error)
 }
@@ -24,17 +22,16 @@ type RemotePeer interface {
 type RemotePeerConfig struct {
 	quic.Config
 	Addr string
-	ContextErrorAggregator
 }
 
 type remotePeer struct {
 	quic.Session
-	context.Context
+	CanclableContext
 }
 
 // NewRemotePeer create new remote peer
-func NewRemotePeer(ctx context.Context, config RemotePeerConfig) (RemotePeer, error) {
-	rCtx, cancler := context.WithCancel(ctx)
+func NewRemotePeer(ctx CanclableContext, config RemotePeerConfig) (RemotePeer, error) {
+	rCtx := ctx.Derive(nil)
 	session, err := quic.DialAddrContext(
 		rCtx, config.Addr,
 		&tls.Config{
@@ -46,16 +43,11 @@ func NewRemotePeer(ctx context.Context, config RemotePeerConfig) (RemotePeer, er
 		return nil, err
 	}
 
-	go func() {
-		if block := rCtx.Done(); block != nil {
-			<-block
-			cancler()
-
-			if err := session.CloseWithError(0, "closed"); err != nil {
-				config.Collect(err)
-			}
+	rCtx.Cleancup(func() {
+		if err := session.CloseWithError(0, "closed"); err != nil {
+			rCtx.CollectError(err)
 		}
-	}()
+	})
 
 	return remotePeer{
 		session,
@@ -64,14 +56,10 @@ func NewRemotePeer(ctx context.Context, config RemotePeerConfig) (RemotePeer, er
 }
 
 func (peer remotePeer) NewChannel() (io.ReadWriteCloser, error) {
-	stream, err := peer.OpenStreamSync(peer.Context)
+	stream, err := peer.OpenStreamSync(peer)
 	if err != nil {
 		return nil, err
 	}
 
 	return stream, nil
-}
-
-func (peer remotePeer) Close() error {
-	return peer.Close()
 }

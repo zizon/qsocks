@@ -1,46 +1,38 @@
 package peer
 
 import (
-	"context"
 	"io"
 	"net"
 )
 
 // LocalPeer for local enpoint
 type LocalPeer interface {
-	io.Closer
 	PollNewChannel() (io.ReadWriteCloser, error)
 }
 
 // LocalPeerConfig config for local peer
 type LocalPeerConfig struct {
 	Addr string
-	ContextErrorAggregator
 }
 
 type localPeer struct {
-	context.Context
+	CanclableContext
 	net.Listener
 }
 
 // NewLocalPeer create new local endpoint
-func NewLocalPeer(ctx context.Context, config LocalPeerConfig) (LocalPeer, error) {
+func NewLocalPeer(ctx CanclableContext, config LocalPeerConfig) (LocalPeer, error) {
 	listener, err := net.Listen("tcp", config.Addr)
 	if err != nil {
 		return nil, err
 	}
 
-	lCtx, cancler := context.WithCancel(ctx)
-	go func() {
-		if block := lCtx.Done(); block != nil {
-			<-block
-			cancler()
-
-			if err := listener.Close(); err != nil {
-				config.Collect(err)
-			}
+	peerCtx := ctx.Derive(nil)
+	peerCtx.Cleancup(func() {
+		if err := listener.Close(); err != nil {
+			peerCtx.CollectError(err)
 		}
-	}()
+	})
 
 	return localPeer{
 		ctx,
@@ -50,8 +42,4 @@ func NewLocalPeer(ctx context.Context, config LocalPeerConfig) (LocalPeer, error
 
 func (peer localPeer) PollNewChannel() (io.ReadWriteCloser, error) {
 	return peer.Accept()
-}
-
-func (peer localPeer) Close() error {
-	return peer.Listener.Close()
 }

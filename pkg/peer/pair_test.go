@@ -3,24 +3,9 @@ package peer
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net"
-	"reflect"
-	"runtime"
 	"testing"
 )
-
-type quicCollector struct{}
-
-func (l quicCollector) Collect(err error) {
-	switch err {
-	case context.Canceled:
-		return
-	}
-	buf := make([]byte, 1024)
-	runtime.Stack(buf, false)
-	fmt.Printf("collect error: %s:%v\n%s\n", reflect.TypeOf(err), err, buf)
-}
 
 func TestPair(t *testing.T) {
 	pairConfig := PairConfig{
@@ -31,16 +16,14 @@ func TestPair(t *testing.T) {
 		RemotePeerConfig: RemotePeerConfig{
 			Addr: "localhost:10088",
 		},
-		ContextErrorAggregator: quicCollector{},
 	}
 
 	// root context
-	ctx, cancler := context.WithCancel(context.TODO())
+	ctx := NewCanclableContext(context.TODO(), nil)
 
 	// start server
 	server, err := NewServerPeer(ctx, ServerPeerConfig{
-		Addr:                   pairConfig.RemotePeerConfig.Addr,
-		ContextErrorAggregator: pairConfig.ContextErrorAggregator,
+		Addr: pairConfig.RemotePeerConfig.Addr,
 	})
 	if err != nil {
 		t.Errorf("fail to start quic server,reason:%v", err)
@@ -72,7 +55,7 @@ func TestPair(t *testing.T) {
 
 	// read in
 	go func() {
-		defer cancler()
+		defer ctx.Cancle()
 		remote, err := server.PollNewChannel()
 		if err != nil {
 			t.Errorf("fail to accept quic channel,reason:%v", err)
@@ -88,5 +71,5 @@ func TestPair(t *testing.T) {
 		}
 	}()
 
-	<-ctx.Done()
+	ctx.Close()
 }
