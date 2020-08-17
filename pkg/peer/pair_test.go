@@ -71,5 +71,9 @@ func TestPair(t *testing.T) {
 		}
 	}()
 
-	ctx.Close()
+	if err := ctx.Close(); err != nil {
+		if err != context.Canceled {
+			t.Errorf("should be cancle error:%v", err)
+		}
+	}
 }

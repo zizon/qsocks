@@ -68,7 +68,7 @@ func (ctx cancleContext) Derive(collector ContextErrorAggregator) CanclableConte
 	if collector != nil {
 		return NewCanclableContext(ctx, collector)
 	}
-	return NewCanclableContext(ctx, ctx)
+	return NewCanclableContext(ctx, ctx.ContextErrorAggregator)
 }
 
 func (ctx cancleContext) Cleancup(cleanup func()) {

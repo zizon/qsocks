@@ -14,7 +14,12 @@ import (
 
 // ServerPeer server side of quic peering
 type ServerPeer interface {
-	PollNewChannel() (io.ReadWriteCloser, error)
+	PollNewChannel() (PeerChannel, error)
+}
+
+type PeerChannel interface {
+	io.ReadWriteCloser
+	PeerAddr() string
 }
 
 // ServerPeerConfig config for generateing new server peer
@@ -26,6 +31,7 @@ type ServerPeerConfig struct {
 type peerStream struct {
 	CanclableContext
 	io.ReadWriteCloser
+	peerAddr string
 }
 
 type serverPeer struct {
@@ -121,8 +127,10 @@ type peerSession struct {
 func (session peerSession) serveQuicSession() {
 	defer session.Cancle()
 
+	peerAddress := session.Session.RemoteAddr().String()
 	for {
 		stream, err := session.AcceptStream(session)
+
 		if err != nil {
 			session.CollectError(err)
 			break
@@ -132,6 +140,7 @@ func (session peerSession) serveQuicSession() {
 		session.streamC <- peerStream{
 			streamCtx,
 			stream,
+			peerAddress,
 		}
 
 		streamCtx.Cleancup(func() {
@@ -143,13 +152,17 @@ func (session peerSession) serveQuicSession() {
 }
 
 // PollNewChannel poll a new channel
-func (server serverPeer) PollNewChannel() (io.ReadWriteCloser, error) {
+func (server serverPeer) PollNewChannel() (PeerChannel, error) {
 	stream, ok := <-server.streamC
 	if ok {
 		return stream, nil
 	}
 
 	return nil, server.Err()
+}
+
+func (stream peerStream) PeerAddr() string {
+	return stream.peerAddr
 }
 
 func (stream peerStream) Close() error {

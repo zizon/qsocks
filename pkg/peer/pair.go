@@ -87,7 +87,7 @@ func (peer pairing) serve() {
 }
 
 // BiCopy copy bidirectional for both first and second
-func BiCopy(ctx CanclableContext, first io.ReadWriteCloser, second io.ReadWriteCloser) {
+func BiCopy(ctx CanclableContext, first io.ReadWriter, second io.ReadWriter) {
 	// copy first -> second
 	go func() {
 		if _, err := io.Copy(second, first); err != nil {
