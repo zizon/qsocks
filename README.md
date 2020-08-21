@@ -13,7 +13,7 @@ dataflows are since bidirectional
 # Example
 ```shell
 ./qsocks -mode qsocks \
-        -listen 0:10086 \
+        -listen 0.0.0.0:10086 \
         -connect your.server:10010 
 ```
 This will start a local socks5 server listening port 10086 on all interface,  
@@ -21,7 +21,7 @@ and connect/forward to remote quic server `your.server` whicl listing at port `1
 
 ```shell
 ./qsocks -mode sqsocks \
-        -listen 0:10010 
+        -listen 0.0.0.0:10010 
 ```
 This will start the quic server listeing local udp port 10010 on all interface.    
 refering to `your.server:10010` above  
