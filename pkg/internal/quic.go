@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -53,11 +54,6 @@ func generateTLSConfig() *tls.Config {
 	}
 }
 
-// SimpleQuicServer quic start a quic server
-func SimpleQuicServer(addr string) (quic.Listener, error) {
-	return quic.ListenAddr(addr, generateTLSConfig(), nil)
-}
-
 type quicProxyBundle struct {
 	proxyCtx CanclableContext
 	from     quic.Stream
@@ -69,7 +65,7 @@ func quicProxy(bundle quicProxyBundle) {
 
 	// 1. decode remote
 	packet := &QsockPacket{}
-	if err := packet.ReadFrom(from); err != nil {
+	if err := packet.Decode(from); err != nil {
 		bundle.proxyCtx.CancleWithError(err)
 		return
 	}
@@ -97,6 +93,14 @@ type quicServerBundle struct {
 	listen    string
 }
 
+// StartQuicServer start a quic proxy server
+func StartQuicServer(ctx context.Context, listen string) {
+	go quicServer(quicServerBundle{
+		NewCanclableContext(ctx),
+		listen,
+	})
+}
+
 func quicServer(bundle quicServerBundle) {
 	server, err := quic.ListenAddr(bundle.listen, generateTLSConfig(), nil)
 	if err != nil {
@@ -104,6 +108,7 @@ func quicServer(bundle quicServerBundle) {
 		return
 	}
 	bundle.serverCtx.Cleanup(server.Close)
+	LogInfo("quic server listening:%s", server.Addr())
 
 	for {
 		session, err := server.Accept(bundle.serverCtx)

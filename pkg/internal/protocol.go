@@ -7,6 +7,7 @@ import (
 )
 
 /*
+Auth request of socks5 protocol
 +----+----------+----------+
 |VER | NMETHODS | METHODS  |
 +----+----------+----------+
@@ -19,7 +20,8 @@ type Auth struct {
 	METHODS  []byte
 }
 
-func (auth *Auth) ReadFrom(r io.Reader) error {
+// Decode decode from reader
+func (auth *Auth) Decode(r io.Reader) error {
 	buf := make([]byte, 2)
 	_, err := io.ReadFull(r, buf)
 	if err != nil {
@@ -38,6 +40,7 @@ func (auth *Auth) ReadFrom(r io.Reader) error {
 }
 
 /*
+AuthReply socks5 auth reply
 +----+--------+
 |VER | METHOD |
 +----+--------+
@@ -49,12 +52,14 @@ type AuthReply struct {
 	METHOD byte
 }
 
-func (reply AuthReply) WriteTo(w io.Writer) error {
+// Encode encode into writer
+func (reply AuthReply) Encode(w io.Writer) error {
 	_, err := w.Write([]byte{0x05, 0x00})
 	return err
 }
 
 /*
+Request socks5 reqeust
 +----+-----+-------+------+----------+----------+
 |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
 +----+-----+-------+------+----------+----------+
@@ -70,7 +75,8 @@ type Request struct {
 	PORT int
 }
 
-func (request *Request) ReadFrom(r io.Reader) error {
+// Decode decode from reader
+func (request *Request) Decode(r io.Reader) error {
 	buf := make([]byte, 4)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
@@ -115,6 +121,7 @@ func (request *Request) ReadFrom(r io.Reader) error {
 }
 
 /*
+Reply socks5 reply
 +----+-----+-------+------+----------+----------+
 |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
 +----+-----+-------+------+----------+----------+
@@ -130,7 +137,8 @@ type Reply struct {
 	PORT int
 }
 
-func (reply Reply) WriteTo(w io.Writer) error {
+// Encode encode into writer
+func (reply Reply) Encode(w io.Writer) error {
 	buf := []byte{
 		0x05, 0x00, 0x00,
 		0x03,
@@ -149,6 +157,7 @@ func (reply Reply) WriteTo(w io.Writer) error {
 }
 
 /*
+UDPRequest socks5 upd request
 +----+------+------+----------+----------+----------+
 |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
 +----+------+------+----------+----------+----------+
@@ -166,11 +175,12 @@ type UDPRequest struct {
 }
 
 /*
-+-----+------+----------+----------+
-|TYPE | ATYP | DST.PORT | DST.HOST |
-+-----+------+----------+----------+
-| 1   |  1   |    2     | Variable |
-+-----+------+----------+----------+
+QsockPacket quic sock proxy protocl
++-----+----------+----------+
+|TYPE | DST.PORT | DST.HOST |
++-----+----------+----------+
+| 1   |    2     | Variable |
++-----+----------+----------+
 */
 type QsockPacket struct {
 	TYPE byte
@@ -178,7 +188,8 @@ type QsockPacket struct {
 	HOST string
 }
 
-func (packet QsockPacket) WriteTo(w io.Writer) error {
+// Encode encode into writer
+func (packet QsockPacket) Encode(w io.Writer) error {
 	buf := []byte{
 		0x01,
 		0x00, 0x00,
@@ -193,7 +204,8 @@ func (packet QsockPacket) WriteTo(w io.Writer) error {
 	return nil
 }
 
-func (packet *QsockPacket) ReadFrom(r io.Reader) error {
+// Decode decode from reader
+func (packet *QsockPacket) Decode(r io.Reader) error {
 	buf := make([]byte, 3)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err

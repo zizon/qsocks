@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"fmt"
 	"io"
 )
 
@@ -20,20 +19,4 @@ func BiCopy(ctx CanclableContext, first io.ReadWriter, second io.ReadWriter, cop
 
 	goCopy(first, second)
 	goCopy(second, first)
-}
-
-func DebugPrintCopyFrom(w io.Writer, r io.Reader) (int64, error) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		fmt.Printf("read:%s \n", string(buf[:n]))
-		if err != nil {
-			return 0, err
-		}
-
-		w.Write(buf[:n])
-		if err != nil {
-			return 0, err
-		}
-	}
 }

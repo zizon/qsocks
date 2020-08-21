@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -26,21 +27,21 @@ func socks5Proxy(bundle socks5ProxyBundle) {
 
 	// 1. read auth
 	auth := &Auth{}
-	if err := auth.ReadFrom(from); err != nil {
+	if err := auth.Decode(from); err != nil {
 		bundle.proxyCtx.CancleWithError(err)
 		return
 	}
 
 	// 2. auth
 	authReply := AuthReply{}
-	if err := authReply.WriteTo(from); err != nil {
+	if err := authReply.Encode(from); err != nil {
 		bundle.proxyCtx.CancleWithError(err)
 		return
 	}
 
 	// 3. read request
 	request := &Request{}
-	if err := request.ReadFrom(from); err != nil {
+	if err := request.Decode(from); err != nil {
 		bundle.proxyCtx.CancleWithError(err)
 		return
 	}
@@ -50,7 +51,7 @@ func socks5Proxy(bundle socks5ProxyBundle) {
 		HOST: []byte(addr.IP.String()),
 		PORT: addr.Port,
 	}
-	if err := reply.WriteTo(from); err != nil {
+	if err := reply.Encode(from); err != nil {
 		bundle.proxyCtx.CancleWithError(err)
 		return
 	}
@@ -79,7 +80,7 @@ func socks5Proxy(bundle socks5ProxyBundle) {
 		default:
 			packet.HOST = string(request.HOST)
 		}
-		if err := packet.WriteTo(to); err != nil {
+		if err := packet.Encode(to); err != nil {
 			bundle.proxyCtx.CancleWithError(err)
 			return
 		}
@@ -107,6 +108,15 @@ type socks5ServerBundle struct {
 	serverCtx CanclableContext
 	listen    string
 	remote    string
+}
+
+// StartSocks5Server start a local socks->quic server
+func StartSocks5Server(ctx context.Context, listen, connect string) {
+	go socks5Server(socks5ServerBundle{
+		NewCanclableContext(ctx),
+		listen,
+		connect,
+	})
 }
 
 func socks5Server(bundle socks5ServerBundle) {
