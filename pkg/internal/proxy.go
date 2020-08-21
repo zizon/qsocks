@@ -1,37 +1,39 @@
 package internal
 
 import (
-	"net"
+	"fmt"
+	"io"
 )
 
-type Proxy interface {
-	Accept() (net.Conn, error)
-	Connect() (net.Conn, error)
+// BiCopy copy bidirectional for both first and second
+func BiCopy(ctx CanclableContext, first io.ReadWriter, second io.ReadWriter, copyIntoFrom func(io.Writer, io.Reader) (int64, error)) {
+	goCopy := func(reader io.Reader, writer io.Writer) {
+		go func() {
+			if _, err := copyIntoFrom(writer, reader); err != nil {
+				ctx.CancleWithError(err)
+				return
+			}
+
+			ctx.Cancle()
+		}()
+	}
+
+	goCopy(first, second)
+	goCopy(second, first)
 }
 
-func StartProxy(ctx CanclableContext, proxy Proxy) CanclableContext {
-	proxyCtx := ctx.Derive(nil)
-
-	go func() {
-		from, err := proxy.Accept()
+func DebugPrintCopyFrom(w io.Writer, r io.Reader) (int64, error) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := r.Read(buf)
+		fmt.Printf("read:%s \n", string(buf[:n]))
 		if err != nil {
-			proxyCtx.CancleWithError(err)
-			return
+			return 0, err
 		}
-		proxyCtx.Cleanup(from.Close)
 
-		to, err := proxy.Connect()
+		w.Write(buf[:n])
 		if err != nil {
-			proxyCtx.CancleWithError(err)
-			return
+			return 0, err
 		}
-		proxyCtx.Cleanup(to.Close)
-
-		BiCopy(proxyCtx, from, to).Cleanup(func() error {
-			proxyCtx.Cancle()
-			return nil
-		})
-	}()
-
-	return proxyCtx
+	}
 }
