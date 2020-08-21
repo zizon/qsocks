@@ -3,8 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"log"
+	"net"
 
 	"github.com/zizon/qsocks/pkg"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -24,6 +29,18 @@ simliry to listen.
 	)
 
 	flag.Parse()
+
+	// enable pprof
+	go func() {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			log.Panic(err)
+		}
+
+		log.Printf("start pprof at:%s\n", l.Addr().String())
+		http.Serve(l, nil)
+	}()
+
 	switch {
 
 	case *mode == "qsocks" && *listen != "" && *connect != "":
