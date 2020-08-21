@@ -94,11 +94,15 @@ type quicServerBundle struct {
 }
 
 // StartQuicServer start a quic proxy server
-func StartQuicServer(ctx context.Context, listen string) {
+func StartQuicServer(ctx context.Context, listen string) CanclableContext {
+	serverCtx := NewCanclableContext(ctx)
+
 	go quicServer(quicServerBundle{
-		NewCanclableContext(ctx),
+		serverCtx,
 		listen,
 	})
+
+	return serverCtx
 }
 
 func quicServer(bundle quicServerBundle) {

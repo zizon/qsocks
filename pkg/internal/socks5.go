@@ -111,12 +111,16 @@ type socks5ServerBundle struct {
 }
 
 // StartSocks5Server start a local socks->quic server
-func StartSocks5Server(ctx context.Context, listen, connect string) {
+func StartSocks5Server(ctx context.Context, listen, connect string) CanclableContext {
+	serverCtx := NewCanclableContext(ctx)
+
 	go socks5Server(socks5ServerBundle{
-		NewCanclableContext(ctx),
+		serverCtx,
 		listen,
 		connect,
 	})
+
+	return serverCtx
 }
 
 func socks5Server(bundle socks5ServerBundle) {

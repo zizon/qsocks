@@ -24,23 +24,19 @@ simliry to listen.
 	)
 
 	flag.Parse()
-
 	switch {
+
 	case *mode == "qsocks" && *listen != "" && *connect != "":
-		ctx := context.TODO()
-		pkg.StartSocks5Server(ctx, pkg.Socks5Config{
+		<-pkg.StartSocks5Server(context.TODO(), pkg.Socks5Config{
 			Listen:  *listen,
 			Connect: *connect,
-		})
+		}).Done()
 
-		<-ctx.Done()
 	case *mode == "sqserver" && *listen != "":
-		ctx := context.TODO()
-		pkg.StartQuicServer(ctx, pkg.QuicConfig{
+		<-pkg.StartQuicServer(context.TODO(), pkg.QuicConfig{
 			Listen: *listen,
-		})
+		}).Done()
 
-		<-ctx.Done()
 	default:
 		flag.Usage()
 	}
