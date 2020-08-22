@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 
 	"github.com/lucas-clemente/quic-go"
 )
@@ -139,36 +140,53 @@ func socks5Server(bundle socks5ServerBundle) {
 
 	LogInfo("socks5 listen at:%s", addr)
 
-	s, err := quic.DialAddrContext(bundle.serverCtx, bundle.remote, &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         PeerQuicProtocol,
-	}, &quic.Config{})
-	if err != nil {
-		bundle.serverCtx.CancleWithError(err)
-		return
-	}
-	bundle.serverCtx.Cleanup(func() error {
-		s.CloseWithError(0, "")
-		return nil
-	})
-	LogInfo("connect quic:%s", bundle.remote)
-
 	for {
-		conn, err := l.AcceptTCP()
-		//conn.SetNoDelay(true)
+		sessionCtx := bundle.serverCtx.Derive(nil)
+		s, err := quic.DialAddrContext(sessionCtx, bundle.remote, &tls.Config{
+			InsecureSkipVerify: true,
+			NextProtos:         PeerQuicProtocol,
+		}, &quic.Config{})
 		if err != nil {
 			bundle.serverCtx.CancleWithError(err)
-			return
+			continue
+		}
+		sessionCtx.Cleanup(func() error {
+			s.CloseWithError(0, "")
+			return nil
+		})
+		LogInfo("connect quic:%s", bundle.remote)
+
+		// stream limit for each session
+		wg := &sync.WaitGroup{}
+		for i := 0; i < 10; i++ {
+			conn, err := l.AcceptTCP()
+			//conn.SetNoDelay(true)
+			if err != nil {
+				bundle.serverCtx.CancleWithError(err)
+				return
+			}
+
+			LogInfo("accept socks5 from %s -> %s", conn.RemoteAddr(), conn.LocalAddr())
+			wg.Add(1)
+			connCtx := sessionCtx.Derive(nil)
+			connCtx.Cleanup(conn.Close)
+			connCtx.Cleanup(func() error {
+				LogInfo("a stream closed:%v")
+				wg.Done()
+				return nil
+			})
+			go socks5Proxy(socks5ProxyBundle{
+				connCtx,
+				conn,
+				s.OpenStream,
+			})
 		}
 
-		LogInfo("accept socks5 from %s -> %s", conn.RemoteAddr(), conn.LocalAddr())
-
-		connCtx := bundle.serverCtx.Derive(nil)
-		connCtx.Cleanup(conn.Close)
-		go socks5Proxy(socks5ProxyBundle{
-			connCtx,
-			conn,
-			s.OpenStream,
-		})
+		// free up session
+		go func() {
+			wg.Wait()
+			LogInfo("freeup session:%v", s)
+			sessionCtx.Cancle()
+		}()
 	}
 }
