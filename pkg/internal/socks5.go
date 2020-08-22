@@ -171,7 +171,7 @@ func socks5Server(bundle socks5ServerBundle) {
 			connCtx := sessionCtx.Derive(nil)
 			connCtx.Cleanup(conn.Close)
 			connCtx.Cleanup(func() error {
-				LogInfo("a stream closed:%v")
+				LogInfo("a stream closed")
 				wg.Done()
 				return nil
 			})
