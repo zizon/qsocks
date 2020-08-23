@@ -10,13 +10,35 @@ type raceConnector interface {
 	drop(io.ReadWriter)
 }
 
+type raceConnectoable struct {
+	connectFunc func(connectBundle)
+	dropFunc    func(io.ReadWriter)
+}
+
+func (c raceConnectoable) connect(bundle connectBundle) {
+	if c.connectFunc != nil {
+		c.connectFunc(bundle)
+	}
+}
+
+func (c raceConnectoable) drop(rw io.ReadWriter) {
+	if c.dropFunc != nil {
+		c.dropFunc(rw)
+	}
+}
+
 type connectBundle struct {
 	ctx       CanclableContext
-	pushReady func(io.ReadWriteCloser)
+	pushReady func(io.ReadWriter)
+	addr      string
+	port      int
 }
+
 type raceBundle struct {
 	ctx        CanclableContext
 	connectors []raceConnector
+	addr       string
+	port       int
 }
 
 func receConnect(bundle raceBundle) io.ReadWriter {
@@ -32,7 +54,7 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		once := &sync.Once{}
 		go connector.connect(connectBundle{
 			connectCtx,
-			func(connectorReady io.ReadWriteCloser) {
+			func(connectorReady io.ReadWriter) {
 				once.Do(func() {
 					defer wg.Done()
 					select {
@@ -47,6 +69,8 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 					}
 				})
 			},
+			bundle.addr,
+			bundle.port,
 		})
 
 		// glue under reaceCtx
@@ -64,6 +88,7 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		// pushReady are guarded by once,
 		// so, wg should be in correct behavior, and close ready channel should be fine
 		wg.Wait()
+		close(ready)
 	}()
 
 	return rw

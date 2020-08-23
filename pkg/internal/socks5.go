@@ -147,7 +147,7 @@ func socks5Server(bundle socks5ServerBundle) {
 			NextProtos:         PeerQuicProtocol,
 		}, &quic.Config{})
 		if err != nil {
-			bundle.serverCtx.CancleWithError(err)
+			sessionCtx.CancleWithError(err)
 			continue
 		}
 		sessionCtx.Cleanup(func() error {

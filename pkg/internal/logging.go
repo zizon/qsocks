@@ -14,3 +14,8 @@ func LogInfo(format string, v ...interface{}) {
 func LogDebug(format string, v ...interface{}) {
 	log.Println(fmt.Sprintf("[ DEBUG ] "+format, v...))
 }
+
+// LogWarn log in warn level
+func LogWarn(format string, v ...interface{}) {
+	log.Println(fmt.Sprintf("[ WARN ] "+format, v...))
+}
