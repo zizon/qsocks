@@ -18,13 +18,17 @@ type raceConnectoable struct {
 func (c raceConnectoable) connect(bundle connectBundle) {
 	if c.connectFunc != nil {
 		c.connectFunc(bundle)
+		return
 	}
+	LogWarn("no connect function for:%v", bundle)
 }
 
 func (c raceConnectoable) drop(rw io.ReadWriter) {
 	if c.dropFunc != nil {
 		c.dropFunc(rw)
+		return
 	}
+	LogWarn("no dropFunc function for:%v", rw)
 }
 
 type connectBundle struct {
@@ -54,29 +58,22 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		once := &sync.Once{}
 		go connector.connect(connectBundle{
 			connectCtx,
-			func(connectorReady io.ReadWriter) {
+			func(rw io.ReadWriter) {
 				once.Do(func() {
 					defer wg.Done()
 					select {
-					case ready <- connectorReady:
+					case ready <- rw:
 						// first ready connection wins
 						return
 					case <-raceCtx.Done():
 						// block in push,as some had already push
 						// wait notify and do cleanup,
-						connectCtx.Cancle()
 						return
 					}
 				})
 			},
 			bundle.addr,
 			bundle.port,
-		})
-
-		// glue under reaceCtx
-		raceCtx.Cleanup(func() error {
-			connectCtx.Cancle()
-			return nil
 		})
 	}
 

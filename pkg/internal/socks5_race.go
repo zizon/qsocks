@@ -22,12 +22,12 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 	for _, connector := range strings.Split(connect, ",") {
 		connector := strings.TrimSpace(connector)
 		parts := strings.Split(connector, "://")
-		scheme, addr := "quic", connector
+		scheme, connect := "quic", connector
 		switch len(parts) {
 		case 1:
 		case 2:
 			scheme = parts[0]
-			addr = parts[1]
+			connect = parts[1]
 		default:
 			serverCtx.CancleWithError(fmt.Errorf("not supoorted connect string:%s", connector))
 			return serverCtx
@@ -38,7 +38,7 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 			connectorCtx := serverCtx.Derive(nil)
 			c, err := quicConnector(quicConnectorBundle{
 				connectorCtx,
-				addr,
+				connect,
 			})
 			if err != nil {
 				LogWarn("connector:%s fail to initialize, thus disabled", connector)
@@ -91,16 +91,13 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 				return
 			}
 
-			// prepare
-			raceBundle := raceBundle{
+			// race connect
+			to := receConnect(raceBundle{
 				connCtx,
 				bundle.connectors,
 				addr,
 				port,
-			}
-
-			// race connect
-			to := receConnect(raceBundle)
+			})
 			if to == nil {
 				connCtx.CancleWithError(
 					fmt.Errorf("pull no connections for remote: %s:%d",
@@ -108,8 +105,9 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 				return
 			}
 
-			// then do copy
+			// blocking copy
 			BiCopy(connCtx, from, to, io.Copy)
+			connCtx.Cancle()
 		}()
 	}
 }
@@ -150,8 +148,8 @@ func pullSocks5Request(from net.Conn) (string, int, error) {
 	// 5. do command
 	switch request.CMD {
 	case 0x01:
-		// 2. write request header
-
+		// connect
+		// build remote host & port
 		switch request.ATYP {
 		case 0x01, 0x04:
 			return net.IP(request.HOST).String(), request.PORT, nil
