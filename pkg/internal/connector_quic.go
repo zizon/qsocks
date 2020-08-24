@@ -82,7 +82,6 @@ func streamPoll(bundle streamPollBundle) {
 		// limit streams per session
 		wg := &sync.WaitGroup{}
 		for i := 0; i < 10; i++ {
-			LogDebug("counter: %d", i)
 			// remember to do pushReady
 			select {
 			case <-sessionCtx.Done():
@@ -119,10 +118,8 @@ func streamPoll(bundle streamPollBundle) {
 			}
 		}
 
-		LogDebug("leave session loop")
 		// to cleanup sesion
 		go func() {
-			LogDebug("join wait")
 			wg.Wait()
 			LogInfo("free up a quic session:v", session)
 			sessionCtx.Cancle()
