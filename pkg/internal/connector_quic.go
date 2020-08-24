@@ -29,14 +29,14 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 		bundle.connect,
 	})
 
-	return raceConnectorFunc(func(connBundle connectBundle) {
+	return func(connBundle connectBundle) {
 		select {
 		case bundle.requests <- connBundle:
 		case <-connBundle.ctx.Done():
 		case <-connectorCtx.Done():
 			connBundle.ctx.CancleWithError(connectorCtx.Err())
 		}
-	}), nil
+	}, nil
 }
 
 type streamPollBundle struct {

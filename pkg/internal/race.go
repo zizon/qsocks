@@ -5,15 +5,7 @@ import (
 	"reflect"
 )
 
-type raceConnector interface {
-	connect(connectBundle)
-}
-
-type raceConnectorFunc func(connectBundle)
-
-func (f raceConnectorFunc) connect(bundle connectBundle) {
-	f(bundle)
-}
+type raceConnector func(connectBundle)
 
 type connectBundle struct {
 	ctx       CanclableContext
@@ -44,7 +36,7 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		// may be drop immediatly
 		connectCtx := bundle.ctx.Derive(nil)
 
-		go connector.connect(connectBundle{
+		go connector(connectBundle{
 			connectCtx,
 			func(rw io.ReadWriter) {
 				defer raceCtx.Cancle()
@@ -67,7 +59,10 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	}
 
 	// pull first ready
-	rw := <-ready
-
-	return rw
+	select {
+	case rw := <-ready:
+		return rw
+	case <-bundle.ctx.Done():
+		return nil
+	}
 }
