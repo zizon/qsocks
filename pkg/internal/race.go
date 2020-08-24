@@ -7,28 +7,12 @@ import (
 
 type raceConnector interface {
 	connect(connectBundle)
-	drop(io.ReadWriter)
 }
 
-type raceConnectoable struct {
-	connectFunc func(connectBundle)
-	dropFunc    func(io.ReadWriter)
-}
+type raceConnectorFunc func(connectBundle)
 
-func (c raceConnectoable) connect(bundle connectBundle) {
-	if c.connectFunc != nil {
-		c.connectFunc(bundle)
-		return
-	}
-	LogWarn("no connect function for:%v", bundle)
-}
-
-func (c raceConnectoable) drop(rw io.ReadWriter) {
-	if c.dropFunc != nil {
-		c.dropFunc(rw)
-		return
-	}
-	LogWarn("no dropFunc function for:%v", rw)
+func (f raceConnectorFunc) connect(bundle connectBundle) {
+	f(bundle)
 }
 
 type connectBundle struct {
@@ -49,6 +33,10 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	ready := make(chan io.ReadWriter)
 
 	raceCtx := bundle.ctx.Derive(nil)
+	raceCtx.Cleanup(func() error {
+		close(ready)
+		return nil
+	})
 	// go race connect
 	for _, connector := range bundle.connectors {
 		// raceCtx are used for syncronize,
@@ -68,8 +56,7 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 					LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
 					return
 				case <-raceCtx.Done():
-					// block in push,as some had already push
-					// wait notify and do cleanup,
+					connectCtx.CancleWithError(raceCtx.Err())
 					return
 				}
 
@@ -81,12 +68,6 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 
 	// pull first ready
 	rw := <-ready
-
-	// cancle the other
-	go func() {
-		raceCtx.Cancle()
-		close(ready)
-	}()
 
 	return rw
 }
