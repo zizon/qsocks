@@ -75,7 +75,7 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 	LogInfo("socks5 race listen at:%s", addr)
 
 	for {
-		from, err := l.Accept()
+		from, err := l.AcceptTCP()
 		if err != nil {
 			serverCtx.CancleWithError(err)
 			return
@@ -91,6 +91,7 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 				return
 			}
 
+			LogInfo("race connect -> %s:%d", addr, port)
 			// race connect
 			to := receConnect(raceBundle{
 				connCtx,
@@ -107,7 +108,6 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 
 			// blocking copy
 			BiCopy(connCtx, from, to, io.Copy)
-			connCtx.Cancle()
 		}()
 	}
 }

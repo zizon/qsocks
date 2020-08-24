@@ -27,6 +27,10 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 		requests,
 		bundle.connect,
 	})
+	connectorCtx.Cleanup(func() error {
+		close(requests)
+		return nil
+	})
 
 	connector := raceConnectoable{
 		connectFunc: func(connBundle connectBundle) {
@@ -77,26 +81,28 @@ func streamPoll(bundle streamPollBundle) {
 		// limit streams per session
 		wg := &sync.WaitGroup{}
 		for i := 0; i < 10; i++ {
+			// remember to do pushReady
 			select {
-			case <-sessionCtx.Done():
+			case <-bundle.ctx.Done():
 				// parent die,quit
-				sessionCtx.CancleWithError(bundle.ctx.Err())
 				return
 			case req := <-bundle.requests:
-				// open stream
-				streamCtx := sessionCtx.Derive(nil)
-
+				// track usage
 				wg.Add(1)
+				streamCtx := sessionCtx.Derive(nil)
+				streamCtx.Cleanup(func() error {
+					wg.Done()
+					return nil
+				})
+
+				// open stream
 				stream, err := session.OpenStreamSync(sessionCtx)
 				if err != nil {
 					streamCtx.CancleWithError(err)
 					continue
 				}
 				streamCtx.Cleanup(stream.Close)
-				streamCtx.Cleanup(func() error {
-					wg.Done()
-					return nil
-				})
+				LogInfo("quic connector -> %s:%d", req.packet.HOST, req.packet.PORT)
 
 				// write request
 				if err := req.packet.Encode(stream); err != nil {
