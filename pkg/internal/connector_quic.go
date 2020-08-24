@@ -11,7 +11,7 @@ import (
 type quicConnectorBundle struct {
 	connectoCtx CanclableContext
 	connect     string
-	requests    chan quicConnectRequest
+	requests    chan connectBundle
 }
 
 type quicConnectRequest struct {
@@ -31,26 +31,17 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 
 	return raceConnectorFunc(func(connBundle connectBundle) {
 		select {
-		case bundle.requests <- quicConnectRequest{
-			connBundle.ctx,
-			QsockPacket{
-				0x01,
-				connBundle.port,
-				connBundle.addr,
-			},
-			connBundle.pushReady,
-		}:
-
+		case bundle.requests <- connBundle:
+		case <-connBundle.ctx.Done():
 		case <-connectorCtx.Done():
-			// notify finished
-			connBundle.ctx.Cancle()
+			connBundle.ctx.CancleWithError(connectorCtx.Err())
 		}
 	}), nil
 }
 
 type streamPollBundle struct {
 	ctx      CanclableContext
-	requests chan quicConnectRequest
+	requests chan connectBundle
 	connect  string
 }
 
@@ -90,31 +81,41 @@ func streamPoll(bundle streamPollBundle) {
 			case req := <-bundle.requests:
 				// open stream
 				streamCtx := req.ctx
-				stream, err := session.OpenStreamSync(streamCtx)
-				if err != nil {
-					streamCtx.CancleWithError(err)
-					continue
-				}
-				sessionCtx.Cleanup(func() error {
-					streamCtx.CancleWithError(sessionCtx.Err())
-					return nil
-				})
-
 				wg.Add(1)
 				streamCtx.Cleanup(func() error {
 					wg.Done()
-					return stream.Close()
+					return nil
 				})
-				LogInfo("quic connector -> %s:%d", req.packet.HOST, req.packet.PORT)
 
-				// write request
-				if err := req.packet.Encode(stream); err != nil {
-					streamCtx.CancleWithError(err)
-					continue
-				}
+				// async connect
+				go func() {
+					stream, err := session.OpenStreamSync(streamCtx)
+					if err != nil {
+						streamCtx.CancleWithError(err)
+						return
+					}
+					sessionCtx.Cleanup(func() error {
+						streamCtx.CancleWithError(sessionCtx.Err())
+						return nil
+					})
+					streamCtx.Cleanup(stream.Close)
 
-				// establish
-				go req.pushReady(stream)
+					LogInfo("quic connector -> %s:%d", req.addr, req.port)
+
+					// write request
+					packet := QsockPacket{
+						0x01,
+						req.port,
+						req.addr,
+					}
+					if err := packet.Encode(stream); err != nil {
+						streamCtx.CancleWithError(err)
+						return
+					}
+
+					// establish
+					req.pushReady(stream)
+				}()
 			}
 		}
 
