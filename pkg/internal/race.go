@@ -3,7 +3,6 @@ package internal
 import (
 	"io"
 	"reflect"
-	"sync"
 )
 
 type raceConnector interface {
@@ -47,61 +46,47 @@ type raceBundle struct {
 }
 
 func receConnect(bundle raceBundle) io.ReadWriter {
-	wg := &sync.WaitGroup{}
-
 	ready := make(chan io.ReadWriter)
 
 	raceCtx := bundle.ctx.Derive(nil)
-	bundle.ctx.Cleanup(func() error {
-		raceCtx.Cancle()
-		return nil
-	})
 	// go race connect
 	for _, connector := range bundle.connectors {
-		wg.Add(1)
-
 		// raceCtx are used for syncronize,
-		// do not attatch to it, or connection will
-		// be drop immediatly
+		// do not attatch to it, or connection
+		// may be drop immediatly
 		connectCtx := bundle.ctx.Derive(nil)
-		once := &sync.Once{}
+
 		go connector.connect(connectBundle{
 			connectCtx,
 			func(rw io.ReadWriter) {
-				once.Do(func() {
-					// raced one
-					defer wg.Done()
+				defer raceCtx.Cancle()
 
-					// wati for ready or die
-					select {
-					case ready <- rw:
-						// first ready connection wins
-						LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
-						raceCtx.Cancle()
-						return
-					case <-raceCtx.Done():
-						// block in push,as some had already push
-						// wait notify and do cleanup,
-						return
-					}
-				})
+				// wait for ready or die
+				select {
+				case ready <- rw:
+					// first ready connection wins
+					LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
+					return
+				case <-raceCtx.Done():
+					// block in push,as some had already push
+					// wait notify and do cleanup,
+					return
+				}
+
 			},
 			bundle.addr,
 			bundle.port,
 		})
 	}
 
-	// start close ready channel
+	// pull first ready
+	rw := <-ready
+
+	// cancle the other
 	go func() {
-		// pushReady are guarded by once,
-		// so, wg should be in correct behavior, and close ready channel should be fine
-		wg.Wait()
+		raceCtx.Cancle()
 		close(ready)
 	}()
-
-	// poll firest conncted
-	// may be all connect ware fail?
-	rw := <-ready
 
 	return rw
 }

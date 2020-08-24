@@ -3,6 +3,7 @@ package internal
 import (
 	"crypto/tls"
 	"io"
+	"reflect"
 	"sync"
 
 	quic "github.com/lucas-clemente/quic-go"
@@ -11,6 +12,7 @@ import (
 type quicConnectorBundle struct {
 	connectoCtx CanclableContext
 	connect     string
+	requests    chan quicConnectRequest
 }
 
 type quicConnectRequest struct {
@@ -21,21 +23,16 @@ type quicConnectRequest struct {
 func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 	connectorCtx := bundle.connectoCtx
 
-	requests := make(chan quicConnectRequest)
 	go streamPoll(streamPollBundle{
 		connectorCtx,
-		requests,
+		bundle.requests,
 		bundle.connect,
-	})
-	connectorCtx.Cleanup(func() error {
-		close(requests)
-		return nil
 	})
 
 	connector := raceConnectoable{
 		connectFunc: func(connBundle connectBundle) {
 			select {
-			case requests <- quicConnectRequest{
+			case bundle.requests <- quicConnectRequest{
 				QsockPacket{
 					0x01,
 					connBundle.port,
@@ -43,7 +40,10 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 				},
 				connBundle.pushReady,
 			}:
+
 			case <-connectorCtx.Done():
+				// notify finished
+				connBundle.ctx.Cancle()
 			}
 		},
 		dropFunc: func(rw io.ReadWriter) {
@@ -51,6 +51,8 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 				if err := stream.Close(); err != nil {
 					connectorCtx.CollectError(err)
 				}
+			} else {
+				LogWarn("expect type quic stream,but got:%v", reflect.TypeOf(rw))
 			}
 		},
 	}
@@ -66,6 +68,13 @@ type streamPollBundle struct {
 
 func streamPoll(bundle streamPollBundle) {
 	for {
+		select {
+		case <-bundle.ctx.Done():
+			// context die
+			return
+		default:
+		}
+
 		// build new sesion
 		sessionCtx := bundle.ctx.Derive(nil)
 		session, err := quic.DialAddrContext(sessionCtx, bundle.connect, &tls.Config{
@@ -73,7 +82,8 @@ func streamPoll(bundle streamPollBundle) {
 			NextProtos:         PeerQuicProtocol,
 		}, &quic.Config{})
 		if err != nil {
-			bundle.ctx.CancleWithError(err)
+			// collect and retry
+			sessionCtx.CancleWithError(err)
 			continue
 		}
 		sessionCtx.Cleanup(func() error {
@@ -86,25 +96,22 @@ func streamPoll(bundle streamPollBundle) {
 		for i := 0; i < 10; i++ {
 			// remember to do pushReady
 			select {
-			case <-bundle.ctx.Done():
-				// parent die,quit
-				return
+			case <-sessionCtx.Done():
+				// die,quit
+				break
 			case req := <-bundle.requests:
-				// track usage
-				wg.Add(1)
-				streamCtx := sessionCtx.Derive(nil)
-				streamCtx.Cleanup(func() error {
-					wg.Done()
-					return nil
-				})
-
 				// open stream
-				stream, err := session.OpenStreamSync(sessionCtx)
+				streamCtx := sessionCtx.Derive(nil)
+				stream, err := session.OpenStreamSync(streamCtx)
 				if err != nil {
 					streamCtx.CancleWithError(err)
 					continue
 				}
-				streamCtx.Cleanup(stream.Close)
+				wg.Add(1)
+				streamCtx.Cleanup(func() error {
+					wg.Done()
+					return stream.Close()
+				})
 				LogInfo("quic connector -> %s:%d", req.packet.HOST, req.packet.PORT)
 
 				// write request

@@ -35,14 +35,22 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 
 		switch scheme {
 		case "quic":
+			requests := make(chan quicConnectRequest)
 			connectorCtx := serverCtx.Derive(nil)
+			connectorCtx.Cleanup(func() error {
+				close(requests)
+				return nil
+			})
 			c, err := quicConnector(quicConnectorBundle{
 				connectorCtx,
 				connect,
+				requests,
 			})
 			if err != nil {
-				LogWarn("connector:%s fail to initialize, thus disabled", connector)
+				connectorCtx.CancleWithError(err)
+				continue
 			}
+
 			connectors = append(connectors, c)
 		default:
 			LogWarn("unsupported connector:%s")
