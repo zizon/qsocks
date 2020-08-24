@@ -34,13 +34,16 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 
 	connector := raceConnectoable{
 		connectFunc: func(connBundle connectBundle) {
-			requests <- quicConnectRequest{
+			select {
+			case requests <- quicConnectRequest{
 				QsockPacket{
 					0x01,
 					connBundle.port,
 					connBundle.addr,
 				},
 				connBundle.pushReady,
+			}:
+			case <-connectorCtx.Done():
 			}
 		},
 		dropFunc: func(rw io.ReadWriter) {
