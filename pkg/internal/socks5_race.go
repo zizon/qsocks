@@ -22,7 +22,7 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 	for _, connector := range strings.Split(connect, ",") {
 		connector := strings.TrimSpace(connector)
 		parts := strings.Split(connector, "://")
-		scheme, connect := "quic", connector
+		scheme, connect := "sqserver", connector
 		switch len(parts) {
 		case 1:
 		case 2:
@@ -34,7 +34,7 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 		}
 
 		switch scheme {
-		case "quic":
+		case "sqserver":
 			requests := make(chan connectBundle)
 			connectorCtx := serverCtx.Derive(nil)
 			connectorCtx.Cleanup(func() error {
