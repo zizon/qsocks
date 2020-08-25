@@ -47,13 +47,6 @@ type streamPollBundle struct {
 
 func streamPoll(bundle streamPollBundle) {
 	for {
-		select {
-		case <-bundle.ctx.Done():
-			// context die
-			return
-		default:
-		}
-
 		// build new sesion
 		sessionCtx := bundle.ctx.Derive(nil)
 		session, err := quic.DialAddrContext(sessionCtx, bundle.connect, &tls.Config{
@@ -73,12 +66,16 @@ func streamPoll(bundle streamPollBundle) {
 		// limit streams per session
 		wg := &sync.WaitGroup{}
 		for i := 0; i < 10; i++ {
-			// remember to do pushReady
-			select {
-			case <-sessionCtx.Done():
-				// die,quit
-				break
-			case req := <-bundle.requests:
+			//
+			req, more := <-bundle.requests
+			if !more {
+				LogInfo("reqeust queue empty,quit connector")
+				return
+			}
+
+			// async connect,
+			// for faster concurrent raceConnector
+			go func() {
 				// open stream
 				streamCtx := req.ctx
 				wg.Add(1)
@@ -87,36 +84,36 @@ func streamPoll(bundle streamPollBundle) {
 					return nil
 				})
 
-				// async connect
-				go func() {
-					stream, err := session.OpenStreamSync(streamCtx)
-					if err != nil {
-						streamCtx.CancleWithError(err)
-						return
-					}
-					sessionCtx.Cleanup(func() error {
-						streamCtx.CancleWithError(sessionCtx.Err())
-						return nil
-					})
-					streamCtx.Cleanup(stream.Close)
+				// attach to session context,
+				// since reqeust context is from raceConnector
+				sessionCtx.Cleanup(func() error {
+					streamCtx.CancleWithError(sessionCtx.Err())
+					return nil
+				})
 
-					LogInfo("quic connector -> %s:%d", req.addr, req.port)
+				stream, err := session.OpenStreamSync(streamCtx)
+				if err != nil {
+					streamCtx.CancleWithError(err)
+					return
+				}
+				streamCtx.Cleanup(stream.Close)
 
-					// write request
-					packet := QsockPacket{
-						0x01,
-						req.port,
-						req.addr,
-					}
-					if err := packet.Encode(stream); err != nil {
-						streamCtx.CancleWithError(err)
-						return
-					}
+				LogInfo("quic connector -> %s:%d", req.addr, req.port)
 
-					// establish
-					req.pushReady(stream)
-				}()
-			}
+				// write request
+				packet := QsockPacket{
+					0x01,
+					req.port,
+					req.addr,
+				}
+				if err := packet.Encode(stream); err != nil {
+					streamCtx.CancleWithError(err)
+					return
+				}
+
+				// establish
+				req.pushReady(stream)
+			}()
 		}
 
 		// to cleanup sesion

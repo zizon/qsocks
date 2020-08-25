@@ -48,7 +48,9 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 					LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
 					return
 				case <-raceCtx.Done():
-					connectCtx.CancleWithError(raceCtx.Err())
+					// or someone had already call pushReady,
+					// cancel so as to free up resources
+					connectCtx.Cancle()
 					return
 				}
 
@@ -58,11 +60,12 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		})
 	}
 
-	// pull first ready
 	select {
 	case rw := <-ready:
+		// pull first ready
 		return rw
 	case <-bundle.ctx.Done():
+		// or canceled
 		return nil
 	}
 }

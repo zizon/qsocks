@@ -89,10 +89,11 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 			return
 		}
 
-		// pull remote info
-		connCtx := serverCtx.Derive(nil)
-		connCtx.Cleanup(from.Close)
 		go func() {
+			// pull remote info
+			connCtx := serverCtx.Derive(nil)
+			connCtx.Cleanup(from.Close)
+
 			addr, port, err := pullSocks5Request(from)
 			if err != nil {
 				connCtx.CancleWithError(err)
