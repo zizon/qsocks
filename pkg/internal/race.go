@@ -21,36 +21,47 @@ type raceBundle struct {
 	port       int
 }
 
+type connectorJoinGroup struct {
+	ctx   CanclableContext
+	ready chan io.ReadWriter
+}
+
 func receConnect(bundle raceBundle) io.ReadWriter {
-	ready := make(chan io.ReadWriter)
-	connectStates := make([]CanclableContext, len(bundle.connectors))
+	connectStates := make([]connectorJoinGroup, len(bundle.connectors))
+
 	// go race connect
 	for i, connector := range bundle.connectors {
 		// raceCtx are used for syncronize,
 		// do not attatch to it, or connection
 		// may be drop immediatly
 		connectCtx := bundle.ctx.Derive(nil)
-		connectStates[i] = connectCtx
+		joinGroup := connectorJoinGroup{
+			connectCtx,
+			make(chan io.ReadWriter),
+		}
+		connectStates[i] = joinGroup
+		joinGroup.ctx.Cleanup(func() error {
+			close(joinGroup.ready)
+			return nil
+		})
 
 		go connector(connectBundle{
 			connectCtx,
 			func(rw io.ReadWriter) {
-				// early test, since a cancled context means
-				// closed ready channel, thus casing the second select
-				// a chance to go reusme with the send case which
-				// eventualy case panic
 				select {
-				case <-connectCtx.Done():
+				case <-joinGroup.ctx.Done():
 					return
 				default:
 				}
 
 				// wait for ready or die
 				select {
-				case ready <- rw:
+				case joinGroup.ready <- rw:
+					LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
 					// first ready connection wins
 					return
 				case <-connectCtx.Done():
+					LogInfo("cancel race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
 					// or someone had already call pushReady,
 					// cancel so as to free up resources.
 					return
@@ -65,44 +76,17 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	// 2. all race faild/canceld
 	for i, state := range connectStates {
 		select {
-		case rw := <-ready:
-			LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
-
-			// go cacenl the others
-			// use i is ok,since no more modification?
+		case rw := <-state.ready:
 			go func() {
-				for j, ctx := range connectStates[i:] {
+				for j, pending := range connectStates[i:] {
 					if i != j {
-						// trigger release reference of context life cycle
-						ctx.Cancle()
-
-						// ensure canceled
-						<-ctx.Done()
-
-						// since ensured canceld,
-						// select case in pushReady should had been selected of
-						// <-ctx.Done(), not channel select.
-						// thus unblocking the select.
-						// when another pushReady invoke, the early check should
-						// safely avoid send on closed channel
+						pending.ctx.Cancle()
 					}
 				}
-
-				// there are one more condidtion.
-				// a seconday race connect enter send channel before getting canceld.
-				// so, optionlay pull that one
-				select {
-				case <-ready:
-				default:
-				}
-
-				// should be safe to close ready,
-				// since it should break selelet in race connect pushReady
-				close(ready)
 			}()
 
 			return rw
-		case <-state.Done():
+		case <-state.ctx.Done():
 			// this connect fail,
 			// wait for next
 			LogInfo("some race was cancel")
@@ -111,23 +95,6 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	}
 
 	LogWarn("all race fail")
-	go func() {
-		// race fail means all blocking of pushReady of case <-ctx.Done()
-		// should had return. ensure it
-		for _, state := range connectStates {
-			<-state.Done()
-		}
-
-		// similly to race success, a optional seconday may had enter send channel.
-		// pull it maybe
-		select {
-		case <-ready:
-		default:
-		}
-
-		close(ready)
-	}()
-
 	// all fail
 	return nil
 }
