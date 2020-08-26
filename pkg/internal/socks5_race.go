@@ -52,6 +52,14 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 			}
 
 			connectors = append(connectors, c)
+		case "direct":
+			c, err := directConnector()
+			if err != nil {
+				serverCtx.CollectError(err)
+				continue
+			}
+
+			connectors = append(connectors, c)
 		default:
 			LogWarn("unsupported connector:%s")
 		}
