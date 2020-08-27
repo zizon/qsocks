@@ -3,6 +3,7 @@ package internal
 import (
 	"io"
 	"reflect"
+	"sync"
 )
 
 type raceConnector func(connectBundle)
@@ -21,13 +22,15 @@ type raceBundle struct {
 	port       int
 }
 
-type connectorJoinGroup struct {
-	ctx   CanclableContext
-	ready chan io.ReadWriter
+type winner struct {
+	rw    io.ReadWriter
+	index int
 }
 
 func receConnect(bundle raceBundle) io.ReadWriter {
-	connectStates := make([]connectorJoinGroup, len(bundle.connectors))
+	once := &sync.Once{}
+	ready := make(chan winner)
+	connectCtxs := make([]CanclableContext, len(bundle.connectors))
 
 	// go race connect
 	for i, connector := range bundle.connectors {
@@ -35,66 +38,49 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		// do not attatch to it, or connection
 		// may be drop immediatly
 		connectCtx := bundle.ctx.Derive(nil)
-		joinGroup := connectorJoinGroup{
-			connectCtx,
-			make(chan io.ReadWriter),
-		}
-		connectStates[i] = joinGroup
-		joinGroup.ctx.Cleanup(func() error {
-			close(joinGroup.ready)
-			return nil
-		})
+		connectCtxs[i] = connectCtx
 
 		go connector(connectBundle{
 			connectCtx,
-			func(rw io.ReadWriter) {
-				select {
-				case <-joinGroup.ctx.Done():
-					return
-				default:
+			func(tracker int) func(rw io.ReadWriter) {
+				return func(rw io.ReadWriter) {
+					once.Do(func() {
+						ready <- winner{
+							rw,
+							tracker,
+						}
+						close(ready)
+					})
 				}
-
-				// wait for ready or die
-				select {
-				case joinGroup.ready <- rw:
-					LogInfo("win race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
-					// first ready connection wins
-					return
-				case <-connectCtx.Done():
-					LogInfo("cancel race connect -> %s:%d %v", bundle.addr, bundle.port, reflect.TypeOf(rw))
-					// or someone had already call pushReady,
-					// cancel so as to free up resources.
-					return
-				}
-			},
+			}(i),
 			bundle.addr,
 			bundle.port,
 		})
 	}
 
-	// 1. some race success
-	// 2. all race faild/canceld
-	for i, state := range connectStates {
-		select {
-		case rw := <-state.ready:
-			go func() {
-				for j, pending := range connectStates[i:] {
-					if i != j {
-						pending.ctx.Cancle()
-					}
-				}
-			}()
-
-			return rw
-		case <-state.ctx.Done():
-			// this connect fail,
-			// wait for next
-			LogInfo("some race was cancel")
-			continue
+	allDone := make(chan struct{})
+	go func() {
+		for _, ctx := range connectCtxs {
+			<-ctx.Done()
 		}
+		close(allDone)
+	}()
+
+	// either some race wins or all ctx canceled
+	select {
+	case winning := <-ready:
+		LogInfo("winning race: %v", reflect.TypeOf(winning.rw))
+		go func() {
+			for i, ctx := range connectCtxs {
+				if i != winning.index {
+					ctx.Cancle()
+				}
+			}
+		}()
+		return winning.rw
+	case <-allDone:
+		LogWarn("all race fail")
 	}
 
-	LogWarn("all race fail")
-	// all fail
 	return nil
 }
