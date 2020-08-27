@@ -35,16 +35,10 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 
 		switch scheme {
 		case "sqserver":
-			requests := make(chan connectBundle)
 			connectorCtx := serverCtx.Derive(nil)
-			connectorCtx.Cleanup(func() error {
-				close(requests)
-				return nil
-			})
 			c, err := quicConnector(quicConnectorBundle{
 				connectorCtx,
 				connect,
-				requests,
 			})
 			if err != nil {
 				connectorCtx.CancleWithError(err)

@@ -11,7 +11,6 @@ import (
 type quicConnectorBundle struct {
 	connectoCtx CanclableContext
 	connect     string
-	requests    chan connectBundle
 }
 
 type quicConnectRequest struct {
@@ -22,18 +21,19 @@ type quicConnectRequest struct {
 
 func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 	connectorCtx := bundle.connectoCtx
-
+	requests := make(chan connectBundle)
 	go streamPoll(streamPollBundle{
 		connectorCtx,
-		bundle.requests,
+		requests,
 		bundle.connect,
 	})
 
 	return func(connBundle connectBundle) {
 		select {
-		case bundle.requests <- connBundle:
+		case requests <- connBundle:
 		case <-connBundle.ctx.Done():
 		case <-connectorCtx.Done():
+			close(requests)
 			connBundle.ctx.CancleWithError(connectorCtx.Err())
 		}
 	}, nil
