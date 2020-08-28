@@ -69,7 +69,7 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	// either some race wins or all ctx canceled
 	select {
 	case winning := <-ready:
-		LogInfo("winning race: %v", reflect.TypeOf(winning.rw))
+		LogInfo("winning race -> %s:%d : %v", bundle.addr, bundle.port, reflect.TypeOf(winning.rw))
 		go func() {
 			for i, ctx := range connectCtxs {
 				if i != winning.index {

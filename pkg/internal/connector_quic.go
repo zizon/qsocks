@@ -121,7 +121,7 @@ func streamPoll(bundle streamPollBundle) {
 		// to cleanup sesion
 		go func() {
 			wg.Wait()
-			LogInfo("free up a quic session:v", session)
+			LogInfo("free up a quic session:%v", session)
 			sessionCtx.Cancle()
 		}()
 	}

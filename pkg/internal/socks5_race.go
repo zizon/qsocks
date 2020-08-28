@@ -76,6 +76,7 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 	}
 
 	l, err := net.ListenTCP(addr.Network(), addr)
+
 	if err != nil {
 		serverCtx.CancleWithError(err)
 		return
