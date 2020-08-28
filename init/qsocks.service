@@ -7,5 +7,5 @@ Type=simple
 User=nobody
 Environment=LISTEN=0.0.0.0:10086
 EnvironmentFile=-/etc/qsocks/config
-ExecStart=/usr/local/bin/qsocks -mode sqserver -listen $LISTEN
+ExecStart=/usr/local/bin/qsocks sqserver --listen $LISTEN
 Restart=always
