@@ -79,10 +79,13 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		Dir:  reflect.SelectRecv,
 		Chan: reflect.ValueOf(allDone),
 	})
+
 	if bundle.timeout > 0 {
+		timer := time.NewTimer(time.Duration(bundle.timeout) * time.Second)
 		cases = append(cases, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(time.NewTimer(time.Duration(bundle.timeout) * time.Second).C),
+			Chan: reflect.ValueOf(timer.C),
+			Send: reflect.ValueOf(timer),
 		})
 	}
 
@@ -95,6 +98,7 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 			return nil
 		}
 		go func() {
+			LogInfo("winning -> %s:%d %s", bundle.addr, bundle.port, reflect.TypeOf(winning.rw))
 			for i, ctx := range connectCtxs {
 				if i != winning.index {
 					ctx.Cancle()
@@ -106,6 +110,12 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	case 1:
 		LogWarn("all race fail")
 		return nil
+	case 3:
+		timer, ok := cases[3].Send.Interface().(*time.Timer)
+		if ok {
+			timer.Stop()
+		}
+		fallthrough
 	default:
 		bundle.ctx.Cancle()
 		return nil

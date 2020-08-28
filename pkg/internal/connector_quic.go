@@ -66,19 +66,18 @@ func streamPoll(bundle streamPollBundle) {
 		// limit streams per session
 		wg := &sync.WaitGroup{}
 		for i := 0; i < 10; i++ {
-			//
 			req, more := <-bundle.requests
 			if !more {
 				LogInfo("reqeust queue empty,quit connector")
 				return
 			}
 
+			wg.Add(1)
 			// async connect,
 			// for faster concurrent raceConnector
 			go func() {
 				// open stream
 				streamCtx := req.ctx
-				wg.Add(1)
 				streamCtx.Cleanup(func() error {
 					wg.Done()
 					return nil
