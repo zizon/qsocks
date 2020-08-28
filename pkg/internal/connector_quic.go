@@ -49,7 +49,7 @@ func streamPoll(bundle streamPollBundle) {
 	for {
 		// build new sesion
 		sessionCtx := bundle.ctx.Derive(nil)
-		session, err := quic.DialAddrContext(sessionCtx, bundle.connect, &tls.Config{
+		session, err := quic.DialAddrEarly(bundle.connect, &tls.Config{
 			InsecureSkipVerify: true,
 			NextProtos:         PeerQuicProtocol,
 		}, &quic.Config{})
@@ -91,7 +91,7 @@ func streamPoll(bundle streamPollBundle) {
 					return nil
 				})
 
-				stream, err := session.OpenStreamSync(streamCtx)
+				stream, err := session.OpenStream()
 				if err != nil {
 					// open stream fail,
 					// maybe session broken,cancel it
