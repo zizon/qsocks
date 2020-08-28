@@ -12,10 +12,11 @@ type socks5RaceServerBundle struct {
 	serverCtx  CanclableContext
 	listen     string
 	connectors []raceConnector
+	timeout    int
 }
 
 // StartSocks5RaceServer start a server that rece connecto to remote
-func StartSocks5RaceServer(ctx context.Context, listen, connect string) CanclableContext {
+func StartSocks5RaceServer(ctx context.Context, listen, connect string, timeout int) CanclableContext {
 	serverCtx := NewCanclableContext(ctx)
 
 	connectors := make([]raceConnector, 0)
@@ -63,6 +64,7 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string) Canclabl
 		serverCtx,
 		listen,
 		connectors,
+		timeout,
 	})
 	return serverCtx
 }
@@ -110,6 +112,7 @@ func socks5RaceServer(bundle socks5RaceServerBundle) {
 				bundle.connectors,
 				addr,
 				port,
+				bundle.timeout,
 			})
 			if to == nil {
 				connCtx.CancleWithError(

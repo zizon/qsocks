@@ -10,6 +10,7 @@ import (
 type Socks5Config struct {
 	Listen  string
 	Connect string
+	timeout int
 }
 
 // SetLogLevel set the global log level
@@ -19,7 +20,7 @@ func SetLogLevel(level int) {
 
 // StartSocks5Server public export start interface for socks5 server
 func StartSocks5Server(ctx context.Context, config Socks5Config) context.Context {
-	return internal.StartSocks5RaceServer(ctx, config.Listen, config.Connect)
+	return internal.StartSocks5RaceServer(ctx, config.Listen, config.Connect, config.timeout)
 }
 
 // QuicConfig quic server config

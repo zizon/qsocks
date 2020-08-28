@@ -42,7 +42,7 @@ func TestSockstConnection(t *testing.T) {
 	}()
 
 	go StartQuicServer(ctx, remote)
-	go StartSocks5RaceServer(ctx, listen, remote)
+	go StartSocks5RaceServer(ctx, listen, remote, 0)
 
 	proxyURL, err := url.Parse(fmt.Sprintf("socks5://%s", listen))
 	if err != nil {

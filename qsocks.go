@@ -29,6 +29,7 @@ func main() {
 		connect  string
 		logLevel int
 		mode     bool
+		timeout  int
 	)
 
 	rootCmd := cobra.Command{
@@ -65,6 +66,8 @@ which listen at port 10010
 	qsocksCmd.Flags().StringVarP(&connect, "connect", "c", "",
 		"remote server to connect for quic, sqserver://your.server:port, for direct, direct://")
 	qsocksCmd.MarkFlagRequired("connect")
+
+	qsocksCmd.Flags().IntVarP(&timeout, "timeout", "t", 0, "timeout for connecting remote,in seconds")
 
 	sqserverCmd := &cobra.Command{
 		Use:   "sqserver",

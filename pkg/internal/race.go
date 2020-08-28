@@ -1,9 +1,11 @@
 package internal
 
 import (
+	"fmt"
 	"io"
 	"reflect"
 	"sync"
+	"time"
 )
 
 type raceConnector func(connectBundle)
@@ -20,6 +22,7 @@ type raceBundle struct {
 	connectors []raceConnector
 	addr       string
 	port       int
+	timeout    int
 }
 
 type winner struct {
@@ -67,9 +70,30 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 	}()
 
 	// either some race wins or all ctx canceled
-	select {
-	case winning := <-ready:
-		LogInfo("winning race -> %s:%d : %v", bundle.addr, bundle.port, reflect.TypeOf(winning.rw))
+	cases := make([]reflect.SelectCase, 0)
+	cases = append(cases, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ready),
+	})
+	cases = append(cases, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(allDone),
+	})
+	if bundle.timeout > 0 {
+		cases = append(cases, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(time.NewTimer(time.Duration(bundle.timeout) * time.Second).C),
+		})
+	}
+
+	chosen, value, _ := reflect.Select(cases)
+	switch chosen {
+	case 0:
+		winning, ok := value.Interface().(winner)
+		if !ok {
+			bundle.ctx.CancleWithError(fmt.Errorf("fail to cast:%s to io.ReadWriter", value))
+			return nil
+		}
 		go func() {
 			for i, ctx := range connectCtxs {
 				if i != winning.index {
@@ -77,10 +101,13 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 				}
 			}
 		}()
-		return winning.rw
-	case <-allDone:
-		LogWarn("all race fail")
-	}
 
-	return nil
+		return winning.rw
+	case 1:
+		LogWarn("all race fail")
+		return nil
+	default:
+		bundle.ctx.Cancle()
+		return nil
+	}
 }
