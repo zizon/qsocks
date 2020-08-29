@@ -94,7 +94,7 @@ func streamPoll(bundle streamPollBundle) {
 				if err != nil {
 					// open stream fail,
 					// maybe session broken,cancel it
-					sessionCtx.CancleWithError(err)
+					streamCtx.CancleWithError(err)
 					return
 				}
 				streamCtx.Cleanup(stream.Close)
