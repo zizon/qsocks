@@ -10,23 +10,24 @@ client -> lcoal socks5 -> remote quic -> target
 
 dataflows are since bidirectional
 
-# Example
-```shell
-./qsocks -mode qsocks \
-        -listen 0.0.0.0:10086 \
-        -connect your.server:10010 
-```
-This will start a local socks5 server listening port 10086 on all interface,  
-and connect/forward to remote quic server `your.server` whicl listing at port `10010`.  
+# Examples:
+start a quic proxy server
+./qsocks sqserver -l 0.0.0.0:10086
 
-```shell
-./qsocks -mode sqsocks \
-        -listen 0.0.0.0:10010 
-```
-This will start the quic server listeing local udp port 10010 on all interface.    
-refering to `your.server:10010` above  
+start a local socks5 server listening 10086 wich connect the remote quic server
+which listen at port 10010
+./qsocks qsocks -l 0.0.0.0. -c sqserver://{address.of.quic.server}:10010
+		
 
-And now,all `TCP` connections are runing inside QUIC streams between this two party.  
+Available Commands:
+  help        Help about any command
+  qsocks      start a local socks5 server
+  sqserver    run a quic proxy server
+
+Flags:
+  -h, --help          help for this command
+      --mode          qsocks command mode,deprecated
+  -v, --verbose int   log verbose level from 0 - 4, higher means more verbose, default 2 (default 2)
 
 # Issue
 Currently, the socks5 part only implement a limited set of spec,mostly the `CONNECT` command.  
