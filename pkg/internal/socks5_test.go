@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -12,39 +11,23 @@ import (
 	"time"
 )
 
-func TestSockstConnection(t *testing.T) {
-	SetDefaultCollector(func(err error) {
-		//fmt.Printf("err %v type:%v\n", err, reflect.TypeOf(err))
-		//defaultCollector(err)
-	})
+const (
+	statusExpect = 204
+)
 
-	root := NewCanclableContext(context.TODO())
-	ctx := root.Derive(nil)
-
-	listen := "localhost:10087"
-	remote := "localhost:10088"
-	httpListen := "localhost:10089"
-
-	statusExpect := 204
-
-	httpl, err := net.Listen("tcp", httpListen)
-	if err != nil {
-		t.Error(err)
-	}
-	ctx.Cleanup(httpl.Close)
+func SetupProxyTarget(ctx CanclableContext, httpListen string, t *testing.T) {
 	go func() {
-		if err := http.Serve(httpl, http.HandlerFunc(func(resp http.ResponseWriter, request *http.Request) {
+		if err := http.ListenAndServe(httpListen, http.HandlerFunc(func(resp http.ResponseWriter, request *http.Request) {
 			LogDebug("receive http request %v", request)
 			resp.WriteHeader(statusExpect)
 		})); err != nil {
 			t.Error(err)
 		}
 	}()
+}
 
-	go StartQuicServer(ctx, remote)
-	go StartSocks5RaceServer(ctx, listen, remote, 0)
-
-	proxyURL, err := url.Parse(fmt.Sprintf("socks5://%s", listen))
+func StartClientTest(ctx CanclableContext, socks5 string, target string, t *testing.T, connections int) {
+	proxyURL, err := url.Parse(fmt.Sprintf("socks5://%s", socks5))
 	if err != nil {
 		t.Error(err)
 	}
@@ -58,11 +41,32 @@ func TestSockstConnection(t *testing.T) {
 	<-time.NewTimer(5 * time.Second).C
 
 	wg := &sync.WaitGroup{}
-	for i := 0; i < 100; i++ {
-		concurrent(ctx, client, statusExpect, t, httpListen, wg)
+	for i := 0; i < connections; i++ {
+		concurrent(ctx, client, statusExpect, t, target, wg)
 	}
 	wg.Wait()
+
 	ctx.Cancle()
+}
+
+func TestSockstConnection(t *testing.T) {
+	SetDefaultCollector(func(err error) {
+		//fmt.Printf("err %v type:%v\n", err, reflect.TypeOf(err))
+		//defaultCollector(err)
+	})
+
+	root := NewCanclableContext(context.TODO())
+	ctx := root.Derive(nil)
+
+	listen := "localhost:10087"
+	remote := "localhost:10088"
+	httpListen := "localhost:10089"
+	SetupProxyTarget(ctx, httpListen, t)
+
+	go StartQuicServer(ctx, remote)
+	go StartSocks5RaceServer(ctx, listen, remote, 0)
+
+	StartClientTest(ctx, listen, httpListen, t, 100)
 }
 
 func concurrent(parent CanclableContext, client http.Client, statusExpect int, t *testing.T, httpListen string, wg *sync.WaitGroup) {
@@ -97,17 +101,17 @@ func concurrent(parent CanclableContext, client http.Client, statusExpect int, t
 			return
 		}
 
-		LogDebug("send http request:%v", request)
+		LogDebug("send http request: %v", request)
 		resp, err := client.Do(request)
 
-		LogDebug("response:%v", resp)
+		LogDebug("response: %v", resp)
 		if err != nil {
 			t.Error(err)
 			ctx.CancleWithError(err)
 			return
 		} else if resp.StatusCode != statusExpect {
-			t.Errorf("not http 204")
-			ctx.CancleWithError(fmt.Errorf("not http 204"))
+			t.Errorf("not http 204: %d", resp.StatusCode)
+			ctx.CancleWithError(fmt.Errorf("not http 204: %d", resp.StatusCode))
 			return
 		}
 	}()

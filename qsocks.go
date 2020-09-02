@@ -43,12 +43,16 @@ start a quic proxy server
 start a local socks5 server listening 10086 wich connect the remote quic server
 which listen at port 10010
 ./qsocks qsocks -l 0.0.0.0. -c sqserver://{address.of.quic.server}:10010
+
+start a http proxy server
+./qsocks http -l 0.0.0.0:8080
 		`,
 	}
 	rootCmd.PersistentFlags().IntVarP(&logLevel, "verbose", "v", 2,
 		"log verbose level from 0 - 4, higher means more verbose, default 2")
 	rootCmd.PersistentFlags().BoolVarP(&mode, "mode", "", false, "qsocks command mode,deprecated")
 
+	// qsocks
 	qsocksCmd := &cobra.Command{
 		Use:   "qsocks",
 		Short: "start a local socks5 server",
@@ -64,11 +68,12 @@ which listen at port 10010
 	qsocksCmd.MarkFlagRequired("listen")
 
 	qsocksCmd.Flags().StringVarP(&connect, "connect", "c", "",
-		"remote server to connect for quic, sqserver://your.server:port, for direct, direct://")
+		"remote server to connect for quic, sqserver://your.server:port, for direct, direct://, for http, http://your.server:port")
 	qsocksCmd.MarkFlagRequired("connect")
 
 	qsocksCmd.Flags().IntVarP(&timeout, "timeout", "t", 0, "timeout for connecting remote,in seconds")
 
+	// sqsocks
 	sqserverCmd := &cobra.Command{
 		Use:   "sqserver",
 		Short: "run a quic proxy server",
@@ -81,8 +86,24 @@ which listen at port 10010
 	sqserverCmd.Flags().StringVarP(&listen, "listen", "l", "0.0.0.0:10086", "quic listening address")
 	sqserverCmd.MarkFlagRequired("listen")
 
+	// http
+	httpCmd := &cobra.Command{
+		Use:   "http",
+		Short: "run a http proxy server",
+		Run: func(cmd *cobra.Command, args []string) {
+			<-pkg.StartHTTPServer(context.TODO(), pkg.HTTPConfig{
+				Listen: listen,
+			}).Done()
+		},
+	}
+	httpCmd.Flags().StringVarP(&listen, "listen", "l", "0.0.0.0:10086", "quic listening address")
+	httpCmd.MarkFlagRequired("listen")
+
+	// aggrate command
 	rootCmd.AddCommand(qsocksCmd)
 	rootCmd.AddCommand(sqserverCmd)
+	rootCmd.AddCommand(httpCmd)
 
+	// go
 	rootCmd.Execute()
 }

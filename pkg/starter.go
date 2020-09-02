@@ -32,3 +32,13 @@ type QuicConfig struct {
 func StartQuicServer(ctx context.Context, config QuicConfig) context.Context {
 	return internal.StartQuicServer(ctx, config.Listen)
 }
+
+// HTTPConfig http server config
+type HTTPConfig struct {
+	Listen string
+}
+
+// StartHTTPServer public export start interface for http server
+func StartHTTPServer(ctx context.Context, config HTTPConfig) context.Context {
+	return internal.StartHTTPServer(ctx, config.Listen)
+}

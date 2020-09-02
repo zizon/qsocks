@@ -21,6 +21,7 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string, timeout 
 
 	connectors := make([]raceConnector, 0)
 	for _, connector := range strings.Split(connect, ",") {
+		LogInfo("setup connector: %s", connector)
 		connector := strings.TrimSpace(connector)
 		parts := strings.Split(connector, "://")
 		scheme, connect := "sqserver", connector
@@ -51,6 +52,19 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string, timeout 
 			c, err := directConnector()
 			if err != nil {
 				serverCtx.CollectError(err)
+				continue
+			}
+
+			connectors = append(connectors, c)
+		case "http":
+			connectorCtx := serverCtx.Derive(nil)
+			c, err := httpConnector(httpConnectorBundle{
+				connectorCtx,
+				connect,
+			})
+
+			if err != nil {
+				connectorCtx.CancleWithError(err)
 				continue
 			}
 
