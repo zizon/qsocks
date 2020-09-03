@@ -31,10 +31,8 @@ func httpConnector(bundle httpConnectorBundle) (raceConnector, error) {
 		// send http reqeust
 		_, err = io.WriteString(from, strings.Join(
 			[]string{
-				"POST / HTTP/1.1 \r\n",
-				fmt.Sprintf("HOST:%s \r\n", bundle.gateway),
-				fmt.Sprintf("Proxy:%s:%d\r\n", connBundle.addr, connBundle.port),
-				"TransferEncoding:identify\r\n", // maybe settign to compilant behavior
+				fmt.Sprintf("CONNECT %s:%d HTTP/1.1 \r\n", connBundle.addr, connBundle.port),
+				//fmt.Sprintf("HOST:%s \r\n", bundle.gateway),
 				"\r\n",
 			},
 			"",

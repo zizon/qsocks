@@ -2,7 +2,6 @@ package internal
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -63,7 +62,7 @@ func serveConn(bundle connBundle) {
 	case len(parts) < 3:
 		bundle.ctx.CancleWithError(fmt.Errorf("not supported protocol"))
 		return
-	case parts[0] != "POST":
+	case parts[0] != "CONNECT":
 		bundle.ctx.CancleWithError(fmt.Errorf("method not support: %s", parts[0]))
 		return
 	case parts[2] != "HTTP/1.1":
@@ -71,27 +70,10 @@ func serveConn(bundle connBundle) {
 		return
 	}
 
-	// find proxy header
-	match := []byte("Proxy:")
 	for {
-		line, err = HTTPReadline(bundle.rw.Reader)
-		if err != nil {
-			bundle.ctx.CancleWithError(err)
-			return
-		}
-
-		switch {
-		case len(line) == 0:
-			break
-		case len(line) < len(match):
-			continue
-		case bytes.Compare(match, line[:len(match)]) != 0:
-			continue
-		}
-
 		// proxy header found
-		target := string(line[len(match):])
-		to, err := net.Dial("tcp", target)
+		LogInfo("try connect to: %s", parts[1])
+		to, err := net.Dial("tcp", parts[1])
 		if err != nil {
 			bundle.ctx.CancleWithError(err)
 			return
@@ -104,8 +86,7 @@ func serveConn(bundle connBundle) {
 		// send response
 		_, err = io.WriteString(bundle.rw, strings.Join(
 			[]string{
-				"HTTP/1.1 201 Crated\r\n",
-				"Content-Length:0\r\n",
+				"HTTP/1.1 201 Created\r\n",
 				"\r\n",
 			},
 			"",
