@@ -46,6 +46,9 @@ which listen at port 10010
 
 start a http proxy server
 ./qsocks http -l 0.0.0.0:8080
+
+start a blind tunnel server
+./qsocks blind -l 0.0.0.0:10086 -t 127.0.0.1:10087
 		`,
 	}
 	rootCmd.PersistentFlags().IntVarP(&logLevel, "verbose", "v", 2,
@@ -99,10 +102,29 @@ start a http proxy server
 	httpCmd.Flags().StringVarP(&listen, "listen", "l", "0.0.0.0:10086", "quic listening address")
 	httpCmd.MarkFlagRequired("listen")
 
+	// http
+	blindCmd := &cobra.Command{
+		Use:   "blind",
+		Short: "run a blind tunnel server",
+		Run: func(cmd *cobra.Command, args []string) {
+			<-pkg.StartBlindServer(context.TODO(), pkg.BlindConfig{
+				Listen:  listen,
+				Forward: connect,
+			}).Done()
+		},
+	}
+	blindCmd.Flags().StringVarP(&listen, "listen", "l", "0.0.0.0:10086", "blind listening address")
+	blindCmd.MarkFlagRequired("listen")
+
+	blindCmd.Flags().StringVarP(&connect, "target", "t", "",
+		"blind forwrding target")
+	blindCmd.MarkFlagRequired("target")
+
 	// aggrate command
 	rootCmd.AddCommand(qsocksCmd)
 	rootCmd.AddCommand(sqserverCmd)
 	rootCmd.AddCommand(httpCmd)
+	rootCmd.AddCommand(blindCmd)
 
 	// go
 	rootCmd.Execute()

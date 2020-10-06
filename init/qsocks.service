@@ -1,6 +1,6 @@
 [Unit]
 Description=qsocks sqserver daemon
-Wants=target.target
+Wants=multi-user.target
 
 [Service]
 Type=simple

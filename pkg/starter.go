@@ -42,3 +42,12 @@ type HTTPConfig struct {
 func StartHTTPServer(ctx context.Context, config HTTPConfig) context.Context {
 	return internal.StartHTTPServer(ctx, config.Listen)
 }
+
+type BlindConfig struct {
+	Listen  string
+	Forward string
+}
+
+func StartBlindServer(ctx context.Context, config BlindConfig) context.Context {
+	return internal.StartBlindServer(ctx, config.Listen, config.Forward)
+}
