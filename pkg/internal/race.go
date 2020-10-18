@@ -82,6 +82,8 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 
 	if bundle.timeout > 0 {
 		timer := time.NewTimer(time.Duration(bundle.timeout) * time.Second)
+		defer timer.Stop()
+
 		cases = append(cases, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(timer.C),
