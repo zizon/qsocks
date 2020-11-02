@@ -11,6 +11,7 @@ const (
 	warn
 	info
 	debug
+	trace
 )
 
 var (
@@ -39,6 +40,13 @@ func LogDebug(format string, v ...interface{}) {
 // LogWarn log in warn level
 func LogWarn(format string, v ...interface{}) {
 	if loglevel >= warn {
+		log.Println(fmt.Sprintf("[ WARN ] "+format, v...))
+	}
+}
+
+// LogTrace log in trace level
+func LogTrace(format string, v ...interface{}) {
+	if loglevel >= trace {
 		log.Println(fmt.Sprintf("[ WARN ] "+format, v...))
 	}
 }

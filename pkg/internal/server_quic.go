@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"time"
 
 	quic "github.com/lucas-clemente/quic-go"
 )
@@ -106,7 +107,9 @@ func StartQuicServer(ctx context.Context, listen string) CanclableContext {
 }
 
 func quicServer(bundle quicServerBundle) {
-	server, err := quic.ListenAddr(bundle.listen, generateTLSConfig(), nil)
+	server, err := quic.ListenAddr(bundle.listen, generateTLSConfig(), &quic.Config{
+		MaxIdleTimeout: 30 * time.Second,
+	})
 	if err != nil {
 		bundle.serverCtx.CancleWithError(err)
 		return

@@ -30,6 +30,7 @@ func main() {
 		logLevel int
 		mode     bool
 		timeout  int
+		streams  int
 	)
 
 	rootCmd := cobra.Command{
@@ -52,7 +53,7 @@ start a blind tunnel server
 		`,
 	}
 	rootCmd.PersistentFlags().IntVarP(&logLevel, "verbose", "v", 2,
-		"log verbose level from 0 - 4, higher means more verbose, default 2")
+		"log verbose level from 0 - 5, higher means more verbose, default 2")
 	rootCmd.PersistentFlags().BoolVarP(&mode, "mode", "", false, "qsocks command mode,deprecated")
 
 	// qsocks
@@ -61,8 +62,10 @@ start a blind tunnel server
 		Short: "start a local socks5 server",
 		Run: func(cmd *cobra.Command, args []string) {
 			<-pkg.StartSocks5Server(context.TODO(), pkg.Socks5Config{
-				Listen:  listen,
-				Connect: connect,
+				Listen:           listen,
+				Connect:          connect,
+				Timeout:          timeout,
+				StreamPerSession: streams,
 			}).Done()
 		},
 	}
@@ -75,6 +78,8 @@ start a blind tunnel server
 	qsocksCmd.MarkFlagRequired("connect")
 
 	qsocksCmd.Flags().IntVarP(&timeout, "timeout", "t", 0, "timeout for connecting remote,in seconds")
+
+	qsocksCmd.Flags().IntVarP(&streams, "streams", "s", 1, "stream per quic session")
 
 	// sqsocks
 	sqserverCmd := &cobra.Command{

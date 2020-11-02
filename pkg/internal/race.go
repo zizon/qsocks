@@ -87,7 +87,6 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 		cases = append(cases, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(timer.C),
-			Send: reflect.ValueOf(timer),
 		})
 	}
 
@@ -110,15 +109,9 @@ func receConnect(bundle raceBundle) io.ReadWriter {
 
 		return winning.rw
 	case 1:
-		LogWarn("all race fail")
+		bundle.ctx.CancleWithError(fmt.Errorf("all race fail"))
 		return nil
 	case 2:
-		timer, ok := cases[3].Send.Interface().(*time.Timer)
-		if !ok {
-			bundle.ctx.CancleWithError(fmt.Errorf("timeout but got no timer value:%v", timer))
-			return nil
-		}
-
 		bundle.ctx.CancleWithError(fmt.Errorf("timeout race connect"))
 		return nil
 	default:

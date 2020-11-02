@@ -15,8 +15,13 @@ type socks5RaceServerBundle struct {
 	timeout    int
 }
 
-// StartSocks5RaceServer start a server that rece connecto to remote
+// StartSocks5RaceServer start a server that rece connecto to remote with limited stream per session
 func StartSocks5RaceServer(ctx context.Context, listen, connect string, timeout int) CanclableContext {
+	return StartSessionLimitedSocks5RaceServer(ctx, listen, connect, timeout, 1)
+}
+
+// StartSessionLimitedSocks5RaceServer start a server that rece connecto to remote
+func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect string, timeout int, streamPerSession int) CanclableContext {
 	serverCtx := NewCanclableContext(ctx)
 
 	connectors := make([]raceConnector, 0)
@@ -41,6 +46,8 @@ func StartSocks5RaceServer(ctx context.Context, listen, connect string, timeout 
 			c, err := quicConnector(quicConnectorBundle{
 				connectorCtx,
 				connect,
+				streamPerSession,
+				timeout,
 			})
 			if err != nil {
 				connectorCtx.CancleWithError(err)

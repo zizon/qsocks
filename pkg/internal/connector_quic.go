@@ -4,13 +4,18 @@ import (
 	"crypto/tls"
 	"io"
 	"sync"
+	"time"
 
 	quic "github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/logging"
+	"github.com/lucas-clemente/quic-go/qlog"
 )
 
 type quicConnectorBundle struct {
-	connectoCtx CanclableContext
-	connect     string
+	connectoCtx     CanclableContext
+	connect         string
+	streamPerSesion int
+	timeout         int
 }
 
 type quicConnectRequest struct {
@@ -26,6 +31,8 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 		connectorCtx,
 		requests,
 		bundle.connect,
+		bundle.streamPerSesion,
+		time.Duration(bundle.timeout) * time.Second,
 	})
 
 	return func(connBundle connectBundle) {
@@ -40,19 +47,48 @@ func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
 }
 
 type streamPollBundle struct {
-	ctx      CanclableContext
-	requests chan connectBundle
-	connect  string
+	ctx             CanclableContext
+	requests        chan connectBundle
+	connect         string
+	streamPerSesion int
+	timeout         time.Duration
+}
+
+type tracer struct {
+	p            logging.Perspective
+	connectionID []byte
+}
+
+func (t tracer) Write(b []byte) (int, error) {
+	LogTrace("p:%s connectionID:%v trace:%s", t.p, t.connectionID, b)
+	return len(b), nil
+}
+
+func (t tracer) Close() error {
+	return nil
 }
 
 func streamPoll(bundle streamPollBundle) {
 	for {
 		// build new sesion
 		sessionCtx := bundle.ctx.Derive(nil)
-		session, err := quic.DialAddrEarly(bundle.connect, &tls.Config{
-			InsecureSkipVerify: true,
-			NextProtos:         PeerQuicProtocol,
-		}, &quic.Config{})
+		session, err := quic.DialAddrEarly(bundle.connect,
+			&tls.Config{
+				InsecureSkipVerify: true,
+				NextProtos:         PeerQuicProtocol,
+			},
+			&quic.Config{
+				Tracer: qlog.NewTracer(func(p logging.Perspective, connectionID []byte) io.WriteCloser {
+					return tracer{
+						p:            p,
+						connectionID: connectionID,
+					}
+				}),
+				HandshakeTimeout: bundle.timeout,
+				MaxIdleTimeout:   bundle.timeout,
+				KeepAlive:        true,
+			},
+		)
 		if err != nil {
 			// collect and retry
 			sessionCtx.CancleWithError(err)
@@ -65,7 +101,7 @@ func streamPoll(bundle streamPollBundle) {
 
 		// limit streams per session
 		wg := &sync.WaitGroup{}
-		for i := 0; i < 10; i++ {
+		for i := 0; i < bundle.streamPerSesion; i++ {
 			req, more := <-bundle.requests
 			if !more {
 				LogInfo("reqeust queue empty,quit connector")
