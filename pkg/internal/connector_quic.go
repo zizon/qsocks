@@ -84,9 +84,9 @@ func streamPoll(bundle streamPollBundle) {
 						connectionID: connectionID,
 					}
 				}),
-				HandshakeTimeout: bundle.timeout,
-				MaxIdleTimeout:   bundle.timeout,
-				KeepAlive:        true,
+				HandshakeIdleTimeout: bundle.timeout,
+				MaxIdleTimeout:       bundle.timeout,
+				KeepAlive:            true,
 			},
 		)
 		if err != nil {
