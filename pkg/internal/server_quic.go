@@ -108,7 +108,8 @@ func StartQuicServer(ctx context.Context, listen string) CanclableContext {
 
 func quicServer(bundle quicServerBundle) {
 	server, err := quic.ListenAddr(bundle.listen, generateTLSConfig(), &quic.Config{
-		MaxIdleTimeout: 30 * time.Second,
+		MaxIdleTimeout:  30 * time.Second,
+		EnableDatagrams: true,
 	})
 	if err != nil {
 		bundle.serverCtx.CancleWithError(err)

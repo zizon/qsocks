@@ -87,6 +87,7 @@ func streamPoll(bundle streamPollBundle) {
 				HandshakeIdleTimeout: bundle.timeout,
 				MaxIdleTimeout:       bundle.timeout,
 				KeepAlive:            true,
+				EnableDatagrams:      true,
 			},
 		)
 		if err != nil {
