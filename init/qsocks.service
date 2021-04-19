@@ -1,6 +1,5 @@
 [Unit]
 Description=qsocks sqserver daemon
-Wants=multi-user.target
 
 [Service]
 Type=simple
@@ -9,3 +8,6 @@ Environment=LISTEN=0.0.0.0:10086
 EnvironmentFile=-/etc/qsocks/config
 ExecStart=/usr/local/bin/qsocks sqserver --listen $LISTEN
 Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -5,7 +5,7 @@ current=`realpath .`
 go=`which go`
 if [ -z $go ];then
     if [ ! -d go ];then
-        curl -L https://golang.org/dl/go1.15.linux-amd64.tar.gz -o go.tar.gz
+        curl -L https://golang.org/dl/go1.16.linux-amd64.tar.gz -o go.tar.gz
         tar -xf go.tar.gz
     fi
 
