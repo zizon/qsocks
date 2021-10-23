@@ -58,6 +58,16 @@ func (reply AuthReply) Encode(w io.Writer) error {
 	return err
 }
 
+func (reply *AuthReply) Decode(r io.Reader) error {
+	buf := make([]byte, 2)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return err
+	}
+	reply.VER = buf[0]
+	reply.METHOD = buf[1]
+	return nil
+}
+
 /*
 Request socks5 reqeust
 +----+-----+-------+------+----------+----------+
@@ -153,6 +163,7 @@ func (reply Reply) Encode(w io.Writer) error {
 	if _, err := w.Write(buf[:2]); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -172,65 +183,4 @@ type UDPRequest struct {
 	HOST []byte
 	PORT int
 	DATA []byte
-}
-
-/*
-QsockPacket quic sock proxy protocl
-+-----+----------+----------+
-|TYPE | DST.PORT | DST.HOST |
-+-----+----------+----------+
-| 1   |    2     | Variable |
-+-----+----------+----------+
-*/
-type QsockPacket struct {
-	TYPE byte
-	PORT int
-	HOST string
-}
-
-// Encode encode into writer
-func (packet QsockPacket) Encode(w io.Writer) error {
-	buf := []byte{
-		0x01,
-		0x00, 0x00,
-		byte(len(packet.HOST)),
-	}
-	buf = append(buf, []byte(packet.HOST)...)
-	binary.BigEndian.PutUint16(buf[1:3], uint16(packet.PORT))
-	if _, err := w.Write(buf); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Decode decode from reader
-func (packet *QsockPacket) Decode(r io.Reader) error {
-	buf := make([]byte, 3)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return err
-	}
-
-	packet.TYPE = buf[0]
-	packet.PORT = int(binary.BigEndian.Uint16(buf[1:3]))
-
-	host, err := readBytes(r)
-	if err != nil {
-		return err
-	}
-	packet.HOST = string(host)
-	return nil
-}
-
-func readBytes(r io.Reader) ([]byte, error) {
-	length := make([]byte, 1)
-	if _, err := io.ReadFull(r, length); err != nil {
-		return nil, err
-	}
-	buf := make([]byte, int(length[0]))
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, err
-	}
-
-	return buf, nil
 }

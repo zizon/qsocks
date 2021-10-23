@@ -1,8 +1,11 @@
 package internal
 
 import (
+	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -11,56 +14,22 @@ import (
 	"github.com/lucas-clemente/quic-go/qlog"
 )
 
-type quicConnectorBundle struct {
-	connectoCtx     CanclableContext
-	connect         string
-	streamPerSesion int
-	timeout         int
+type localQuicServer struct {
+	CanclableContext
 }
 
-type quicConnectRequest struct {
-	ctx       CanclableContext
-	packet    QsockPacket
-	pushReady func(io.ReadWriter)
-}
-
-func quicConnector(bundle quicConnectorBundle) (raceConnector, error) {
-	connectorCtx := bundle.connectoCtx
-	requests := make(chan connectBundle)
-	go streamPoll(streamPollBundle{
-		connectorCtx,
-		requests,
-		bundle.connect,
-		bundle.streamPerSesion,
-		time.Duration(bundle.timeout) * time.Second,
-	})
-
-	return func(connBundle connectBundle) {
-		select {
-		case requests <- connBundle:
-		case <-connBundle.ctx.Done():
-		case <-connectorCtx.Done():
-			close(requests)
-			connBundle.ctx.CancleWithError(connectorCtx.Err())
-		}
-	}, nil
-}
-
-type streamPollBundle struct {
-	ctx             CanclableContext
-	requests        chan connectBundle
-	connect         string
-	streamPerSesion int
-	timeout         time.Duration
+type upstream struct {
+	CanclableContext
+	quic.Stream
 }
 
 type tracer struct {
-	p            logging.Perspective
+	logging.Perspective
 	connectionID []byte
 }
 
 func (t tracer) Write(b []byte) (int, error) {
-	LogTrace("p:%s connectionID:%v trace:%s", t.p, t.connectionID, b)
+	LogTrace("p:%s connectionID:%v trace:%s", t.Perspective, t.connectionID, b)
 	return len(b), nil
 }
 
@@ -68,97 +37,153 @@ func (t tracer) Close() error {
 	return nil
 }
 
-func streamPoll(bundle streamPollBundle) {
-	for {
-		// build new sesion
-		sessionCtx := bundle.ctx.Derive(nil)
-		session, err := quic.DialAddrEarly(bundle.connect,
-			&tls.Config{
-				InsecureSkipVerify: true,
-				NextProtos:         PeerQuicProtocol,
-			},
-			&quic.Config{
-				Tracer: qlog.NewTracer(func(p logging.Perspective, connectionID []byte) io.WriteCloser {
-					return tracer{
-						p:            p,
-						connectionID: connectionID,
-					}
-				}),
-				HandshakeIdleTimeout: bundle.timeout,
-				MaxIdleTimeout:       bundle.timeout,
-				KeepAlive:            true,
-				EnableDatagrams:      true,
-			},
-		)
-		if err != nil {
-			// collect and retry
-			sessionCtx.CancleWithError(err)
-			continue
-		}
-		sessionCtx.Cleanup(func() error {
-			session.CloseWithError(0, "")
-			return nil
-		})
+func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect string, timeout time.Duration, streamPerSession int) CanclableContext {
+	s := &localQuicServer{
+		CanclableContext: NewCanclableContext(ctx),
+	}
 
-		// limit streams per session
-		wg := &sync.WaitGroup{}
-		for i := 0; i < bundle.streamPerSesion; i++ {
-			req, more := <-bundle.requests
-			if !more {
-				LogInfo("reqeust queue empty,quit connector")
+	go func() {
+		l, err := net.Listen("tcp", listen)
+		if err != nil {
+			s.Cancle(fmt.Errorf("fail to listen at:%v reason:%v", listen, err))
+			return
+		}
+
+		streams := make(chan *upstream)
+		go func() {
+			// generate stream
+			for {
+				select {
+				case <-s.Done():
+					return
+				default:
+					session, err := quic.DialAddrEarly(connect,
+						&tls.Config{
+							InsecureSkipVerify: true,
+							NextProtos:         peerQuicProtocol,
+						},
+						&quic.Config{
+							Tracer: qlog.NewTracer(func(p logging.Perspective, connectionID []byte) io.WriteCloser {
+								return tracer{
+									Perspective:  p,
+									connectionID: connectionID,
+								}
+							}),
+							HandshakeIdleTimeout: timeout,
+							MaxIdleTimeout:       timeout,
+							KeepAlive:            true,
+							EnableDatagrams:      true,
+						},
+					)
+					if err != nil {
+						LogWarn("fail to setup upstream:%v reason:%v", connect, err)
+						continue
+					}
+
+					sessionCtx := s.Fork()
+					sessionCtx.OnCancle(func(err error) {
+						session.CloseWithError(0, fmt.Sprintf("session close:%v", err))
+					})
+
+					active := &sync.WaitGroup{}
+					for i := 0; i < streamPerSession; i++ {
+						stream, err := session.OpenStream()
+						if err != nil {
+							sessionCtx.Cancle(fmt.Errorf("session fail to open stream:%v reason:%v", session, err))
+							break
+						}
+
+						active.Add(1)
+						streamCtx := sessionCtx.Fork()
+						streamCtx.OnCancle(func(err error) {
+							stream.Close()
+							active.Done()
+						})
+
+						// ready
+						streams <- &upstream{
+							CanclableContext: streamCtx,
+							Stream:           stream,
+						}
+					}
+
+					go func() {
+						// wait of session stream die
+						active.Wait()
+						sessionCtx.Cancle(nil)
+					}()
+				}
+			}
+		}()
+
+		for {
+			c, err := l.Accept()
+			LogInfo("accept one:%v", c.RemoteAddr())
+			if err != nil {
+				s.Cancle(fmt.Errorf("fail to accept for:%v reason:%v", listen, err))
 				return
 			}
 
-			wg.Add(1)
-			// async connect,
-			// for faster concurrent raceConnector
+			// poll one
+			stream := <-streams
+
+			ctx := s.Fork()
+			ctx.OnCancle(func(err error) {
+				c.Close()
+				stream.Cancle(fmt.Errorf("local connection close:%v reason:%v", c, err))
+			})
+
+			// forward upstream
 			go func() {
-				// open stream
-				streamCtx := req.ctx
-				streamCtx.Cleanup(func() error {
-					wg.Done()
-					return nil
-				})
-
-				// attach to session context,
-				// since reqeust context is from raceConnector
-				sessionCtx.Cleanup(func() error {
-					streamCtx.CancleWithError(sessionCtx.Err())
-					return nil
-				})
-
-				stream, err := session.OpenStream()
-				if err != nil {
-					// open stream fail,
-					// maybe session broken,cancel it
-					streamCtx.CancleWithError(err)
-					return
-				}
-				streamCtx.Cleanup(stream.Close)
-
-				LogInfo("quic connector -> %s:%d", req.addr, req.port)
-
-				// write request
-				packet := QsockPacket{
-					0x01,
-					req.port,
-					req.addr,
-				}
-				if err := packet.Encode(stream); err != nil {
-					streamCtx.CancleWithError(err)
+				if _, err := io.Copy(stream, c); err != nil {
+					ctx.Cancle(fmt.Errorf("fail to forward local::%v to remote:%v reason:%v", c, stream, err))
 					return
 				}
 
-				// establish
-				req.pushReady(stream)
+				ctx.Cancle(nil)
+			}()
+
+			// for remote reply
+			go func() {
+				// 1. read auth reply
+				authReply := AuthReply{}
+				if err := authReply.Decode(stream); err != nil {
+					ctx.Cancle(fmt.Errorf("fail read auth reply for stream reaosn:%v", err))
+					return
+				}
+
+				// 2. forward auth reply to client
+				if err := authReply.Encode(c); err != nil {
+					ctx.Cancle(fmt.Errorf("fail to reply to client:%v", err))
+					return
+				}
+
+				// 3. local reply, since remove reply is useless
+				addr, ok := l.Addr().(*net.TCPAddr)
+				if !ok {
+					ctx.Cancle(fmt.Errorf("expect addr to be tcp addr:%v", l))
+					return
+				}
+
+				if err := (&Reply{
+					HOST: addr.IP,
+					PORT: addr.Port,
+				}).Encode(c); err != nil {
+					ctx.Cancle(fmt.Errorf("fail to encode reply:%v reason:%v", c, err))
+					return
+				}
+
+				// 5. start Copy
+				if _, err := io.Copy(c, stream); err != nil {
+					ctx.Cancle(fmt.Errorf("fail to write to local:%v, reason:%v", c, err))
+					return
+				}
+
+				// normal end
+				ctx.Cancle(nil)
 			}()
 		}
+	}()
 
-		// to cleanup sesion
-		go func() {
-			wg.Wait()
-			LogInfo("free up a quic session:%v", session)
-			sessionCtx.Cancle()
-		}()
-	}
+	return s
 }

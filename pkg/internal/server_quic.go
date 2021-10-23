@@ -18,8 +18,75 @@ import (
 
 var (
 	// PeerQuicProtocol quic peer protocl
-	PeerQuicProtocol = []string{"quic-peer"}
+	peerQuicProtocol = []string{"quic-peer"}
 )
+
+type quicServer struct {
+	CanclableContext
+}
+
+type quicStream struct {
+	CanclableContext
+	quic.Stream
+}
+
+// StartQuicServer start a quic proxy server
+func StartQuicServer(ctx context.Context, listen string) CanclableContext {
+	s := quicServer{
+		CanclableContext: NewCanclableContext(ctx),
+	}
+
+	go func() {
+		l, err := quic.ListenAddr(listen, generateTLSConfig(), &quic.Config{
+			MaxIdleTimeout:  30 * time.Second,
+			EnableDatagrams: true,
+		})
+		if err != nil {
+			s.Cancle(fmt.Errorf("fail to listen quic:%v reason:%v", listen, err))
+			return
+		}
+		s.OnCancle(func(e error) {
+			l.Close()
+		})
+
+		for {
+			session, err := l.Accept(s)
+			if err != nil {
+				s.Cancle(fmt.Errorf("fail to accept session:%v reason:%v", listen, err))
+				return
+			}
+			LogInfo("start quic server session:%v\n", session.RemoteAddr())
+
+			sessionCtx := s.Fork()
+			sessionCtx.OnCancle(func(err error) {
+				session.CloseWithError(0, err.Error())
+			})
+
+			go func() {
+				for {
+					stream, err := session.AcceptStream(sessionCtx)
+					if err != nil {
+						sessionCtx.Cancle(fmt.Errorf("session:%v fail to accept stream:%v", session, err))
+						return
+					}
+					LogInfo("accept stream from:%v", session.RemoteAddr())
+
+					streamCtx := sessionCtx.Fork()
+					streamCtx.OnCancle(func(e error) {
+						stream.Close()
+					})
+
+					go (&quicStream{
+						CanclableContext: streamCtx,
+						Stream:           stream,
+					}).start()
+				}
+			}()
+		}
+	}()
+
+	return s
+}
 
 // Setup a bare-bones TLS config for the server
 func generateTLSConfig() *tls.Config {
@@ -51,104 +118,83 @@ func generateTLSConfig() *tls.Config {
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
-		NextProtos:   PeerQuicProtocol,
+		NextProtos:   peerQuicProtocol,
 	}
 }
 
-type quicProxyBundle struct {
-	proxyCtx CanclableContext
-	from     quic.Stream
-}
-
-func quicProxy(bundle quicProxyBundle) {
-	from := bundle.from
-	LogInfo("start quic proxy for:%s\n", from)
-
-	// 1. decode remote
-	packet := &QsockPacket{}
-	if err := packet.Decode(from); err != nil {
-		bundle.proxyCtx.CancleWithError(err)
+func (s *quicStream) start() {
+	// 1. read auth
+	auth := &Auth{}
+	if err := auth.Decode(s); err != nil {
+		s.Cancle(fmt.Errorf("unkonw auth for stream:%v reaosn:%v", s, err))
 		return
 	}
 
-	LogInfo("decode quic request type:%v\n", packet.TYPE)
+	// 2. auth
+	authReply := AuthReply{}
+	if err := authReply.Encode(s); err != nil {
+		s.Cancle(fmt.Errorf("fail auth reply for stream:%v reaosn:%v", s, err))
+		return
+	}
 
-	// 2. build remote addr
-	addr := fmt.Sprintf("%s:%d", packet.HOST, packet.PORT)
+	// 3. read request
+	request := &Request{}
+	if err := request.Decode(s); err != nil {
+		s.Cancle(fmt.Errorf("unkonw request for stream:%v reaosn:%v", s, err))
+		return
+	}
 
-	// 3. connect
+	// 4. assume reply, let client to correct it
+
+	// 5. do command
+	addr, err := func() (string, error) {
+		switch request.CMD {
+		case 0x01:
+			// connect
+			// build remote host & port
+			switch request.ATYP {
+			case 0x01, 0x04:
+				return fmt.Sprintf("%s:%d", net.IP(request.HOST).String(), request.PORT), nil
+			default:
+				return fmt.Sprintf("%s:%d", string(request.HOST), request.PORT), nil
+			}
+		default:
+			// 0x02 bind
+			// 0x03 udp associate
+			return "", fmt.Errorf("unkown command")
+		}
+	}()
+	if err != nil {
+		s.Cancle(fmt.Errorf("fail to resovle remote for stream:%v reason:%v", s, err))
+		return
+	}
+
+	// 6. connect
 	to, err := net.Dial("tcp", addr)
 	if err != nil {
-		bundle.proxyCtx.CancleWithError(err)
+		s.Cancle(fmt.Errorf("fail to connect to:%v reason:%v", to, err))
 		return
 	}
-	bundle.proxyCtx.Cleanup(to.Close)
-
-	LogInfo("quic tcp -> %s", addr)
-	BiCopy(bundle.proxyCtx, from, to, io.Copy)
-	return
-}
-
-type quicServerBundle struct {
-	serverCtx CanclableContext
-	listen    string
-}
-
-// StartQuicServer start a quic proxy server
-func StartQuicServer(ctx context.Context, listen string) CanclableContext {
-	serverCtx := NewCanclableContext(ctx)
-
-	go quicServer(quicServerBundle{
-		serverCtx,
-		listen,
+	s.OnCancle(func(error) {
+		to.Close()
 	})
 
-	return serverCtx
-}
-
-func quicServer(bundle quicServerBundle) {
-	server, err := quic.ListenAddr(bundle.listen, generateTLSConfig(), &quic.Config{
-		MaxIdleTimeout:  30 * time.Second,
-		EnableDatagrams: true,
-	})
-	if err != nil {
-		bundle.serverCtx.CancleWithError(err)
-		return
-	}
-	bundle.serverCtx.Cleanup(server.Close)
-	LogInfo("quic server listening:%s", server.Addr())
-
-	for {
-		session, err := server.Accept(bundle.serverCtx)
-		if err != nil {
-			bundle.serverCtx.CancleWithError(err)
+	LogInfo("quic tcp %s -> %s", addr)
+	go func() {
+		if _, err := io.Copy(s, to); err != nil {
+			s.Cancle(fmt.Errorf("copy stream:%v to remote:%v fail:%v", s, to, err))
 			return
+		} else {
+			s.Cancle(nil)
 		}
-		LogInfo("start quic server session:%v\n", session)
+	}()
 
-		sessionCtx := bundle.serverCtx.Derive(nil)
-		sessionCtx.Cleanup(func() error {
-			session.CloseWithError(0, "")
-			return nil
-		})
-
-		go func() {
-			for {
-				stream, err := session.AcceptStream(sessionCtx)
-				if err != nil {
-					sessionCtx.CancleWithError(err)
-					return
-				}
-				LogInfo("start quic server stream:%v\n", stream)
-
-				streamCtx := sessionCtx.Derive(nil)
-				streamCtx.Cleanup(stream.Close)
-
-				go quicProxy(quicProxyBundle{
-					streamCtx,
-					stream,
-				})
-			}
-		}()
-	}
+	go func() {
+		if _, err := io.Copy(to, s); err != nil {
+			s.Cancle(fmt.Errorf("copy stream:%v to remote:%v fail:%v", s, to, err))
+			return
+		} else {
+			s.Cancle(nil)
+		}
+	}()
 }
