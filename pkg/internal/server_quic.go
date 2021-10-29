@@ -59,20 +59,23 @@ func StartQuicServer(ctx context.Context, listen string) CanclableContext {
 
 			sessionCtx := s.Fork()
 			sessionCtx.OnCancle(func(err error) {
-				session.CloseWithError(0, err.Error())
+				msg := fmt.Sprintf("session closed reason:%v", err)
+				LogInfo(msg)
+				session.CloseWithError(0, msg)
 			})
 
 			go func() {
 				for {
 					stream, err := session.AcceptStream(sessionCtx)
 					if err != nil {
-						sessionCtx.Cancle(fmt.Errorf("session:%v fail to accept stream:%v", session, err))
+						sessionCtx.Cancle(fmt.Errorf("session fail to accept stream:%v", err))
 						return
 					}
 					LogInfo("accept stream from:%v", session.RemoteAddr())
 
 					streamCtx := sessionCtx.Fork()
-					streamCtx.OnCancle(func(e error) {
+					streamCtx.OnCancle(func(err error) {
+						LogInfo("stream clsoed reason:%v", err)
 						stream.Close()
 					})
 
@@ -123,30 +126,14 @@ func generateTLSConfig() *tls.Config {
 }
 
 func (s *quicStream) start() {
-	// 1. read auth
-	auth := &Auth{}
-	if err := auth.Decode(s); err != nil {
-		s.Cancle(fmt.Errorf("unkonw auth for stream:%v reaosn:%v", s, err))
-		return
-	}
-
-	// 2. auth
-	authReply := AuthReply{}
-	if err := authReply.Encode(s); err != nil {
-		s.Cancle(fmt.Errorf("fail auth reply for stream:%v reaosn:%v", s, err))
-		return
-	}
-
-	// 3. read request
+	// 1. read request
 	request := &Request{}
 	if err := request.Decode(s); err != nil {
 		s.Cancle(fmt.Errorf("unkonw request for stream:%v reaosn:%v", s, err))
 		return
 	}
 
-	// 4. assume reply, let client to correct it
-
-	// 5. do command
+	// 2. do command
 	addr, err := func() (string, error) {
 		switch request.CMD {
 		case 0x01:
@@ -179,22 +166,23 @@ func (s *quicStream) start() {
 		to.Close()
 	})
 
-	LogInfo("quic tcp %s -> %s", addr)
+	LogInfo("quic tcp -> %s", addr)
+	// one direction
 	go func() {
 		if _, err := io.Copy(s, to); err != nil {
 			s.Cancle(fmt.Errorf("copy stream:%v to remote:%v fail:%v", s, to, err))
-			return
 		} else {
 			s.Cancle(nil)
 		}
+
+		return
 	}()
 
-	go func() {
-		if _, err := io.Copy(to, s); err != nil {
-			s.Cancle(fmt.Errorf("copy stream:%v to remote:%v fail:%v", s, to, err))
-			return
-		} else {
-			s.Cancle(nil)
-		}
-	}()
+	// the other direction
+	if _, err := io.Copy(to, s); err != nil {
+		s.Cancle(fmt.Errorf("copy stream:%v to remote:%v fail:%v", s, to, err))
+	} else {
+		s.Cancle(nil)
+	}
+	return
 }

@@ -48,6 +48,10 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 			s.Cancle(fmt.Errorf("fail to listen at:%v reason:%v", listen, err))
 			return
 		}
+		s.OnCancle(func(err error) {
+			LogInfo("close listener:%v reason:%v", listen, err)
+			l.Close()
+		})
 
 		streams := make(chan *upstream)
 		go func() {
@@ -82,7 +86,9 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 
 					sessionCtx := s.Fork()
 					sessionCtx.OnCancle(func(err error) {
-						session.CloseWithError(0, fmt.Sprintf("session close:%v", err))
+						msg := fmt.Sprintf("session close:%v", err)
+						LogInfo(msg)
+						session.CloseWithError(0, msg)
 					})
 
 					active := &sync.WaitGroup{}
@@ -96,6 +102,7 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 						active.Add(1)
 						streamCtx := sessionCtx.Fork()
 						streamCtx.OnCancle(func(err error) {
+							LogInfo("stream closed reason:%v", err)
 							stream.Close()
 							active.Done()
 						})
@@ -118,11 +125,11 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 
 		for {
 			c, err := l.Accept()
-			LogInfo("accept one:%v", c.RemoteAddr())
 			if err != nil {
 				s.Cancle(fmt.Errorf("fail to accept for:%v reason:%v", listen, err))
 				return
 			}
+			LogInfo("accept one:%v", c.RemoteAddr())
 
 			// poll one
 			stream := <-streams
@@ -130,57 +137,54 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 			ctx := s.Fork()
 			ctx.OnCancle(func(err error) {
 				c.Close()
-				stream.Cancle(fmt.Errorf("local connection close:%v reason:%v", c, err))
+				stream.Cancle(fmt.Errorf("local connection close reason:%v", err))
 			})
 
-			// forward upstream
+			// speculate reply
 			go func() {
-				if _, err := io.Copy(stream, c); err != nil {
-					ctx.Cancle(fmt.Errorf("fail to forward local::%v to remote:%v reason:%v", c, stream, err))
+				// 1. auth reply
+				if err := (AuthReply{}).Encode(c); err != nil {
+					ctx.Cancle(fmt.Errorf("fail auth reply for stream reaosn:%v", err))
 					return
 				}
 
-				ctx.Cancle(nil)
-			}()
-
-			// for remote reply
-			go func() {
-				// 1. read auth reply
-				authReply := AuthReply{}
-				if err := authReply.Decode(stream); err != nil {
-					ctx.Cancle(fmt.Errorf("fail read auth reply for stream reaosn:%v", err))
-					return
-				}
-
-				// 2. forward auth reply to client
-				if err := authReply.Encode(c); err != nil {
-					ctx.Cancle(fmt.Errorf("fail to reply to client:%v", err))
-					return
-				}
-
-				// 3. local reply, since remove reply is useless
+				// 2. local forwrad reply
 				addr, ok := l.Addr().(*net.TCPAddr)
 				if !ok {
 					ctx.Cancle(fmt.Errorf("expect addr to be tcp addr:%v", l))
 					return
-				}
-
-				if err := (&Reply{
+				} else if err := (&Reply{
 					HOST: addr.IP,
 					PORT: addr.Port,
 				}).Encode(c); err != nil {
-					ctx.Cancle(fmt.Errorf("fail to encode reply:%v reason:%v", c, err))
+					ctx.Cancle(fmt.Errorf("fail to encode reply reason:%v", err))
 					return
 				}
 
-				// 5. start Copy
+				// 3. copy
 				if _, err := io.Copy(c, stream); err != nil {
 					ctx.Cancle(fmt.Errorf("fail to write to local:%v, reason:%v", c, err))
+				} else {
+					ctx.Cancle(nil)
+				}
+				return
+			}()
+
+			// drop auth request
+			go func() {
+				if err := (&Auth{}).Decode(c); err != nil {
+					ctx.Cancle(fmt.Errorf("unkonw auth for stream:%v reaosn:%v", s, err))
 					return
 				}
 
-				// normal end
-				ctx.Cancle(nil)
+				// forward reqeust and the maybe proxy content
+				if _, err := io.Copy(stream, c); err != nil {
+					ctx.Cancle(fmt.Errorf("fail to write to local:%v, reason:%v", c, err))
+				} else {
+					ctx.Cancle(nil)
+				}
+
+				return
 			}()
 		}
 	}()
