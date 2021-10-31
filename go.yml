@@ -1,0 +1,42 @@
+name: Go
+
+on:
+  push:
+    branches: [ master,workflow_dispatch ]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17
+
+    - name: Build
+      run: go build -v ./...
+    
+    - name: Build Image
+      id: build-image
+      uses: redhat-actions/buildah-build@v2
+      with:
+        image: qsocks
+        tags: latest ${{ github.sha }}
+        dockerfiles: |
+          ./Dockerfile
+
+    - name: Push To ghcr.io
+      id: push-to-ghcr
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        image: ${{ steps.build-image.outputs.image }}
+        tags: ${{ steps.build-image.outputs.tags }}
+        registry: ghcr.io
+        username: zizon
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+
+    - name: Print image url
+      run: echo "Image pushed to ${{ steps.push-to-quay.outputs.registry-paths }}"
