@@ -110,14 +110,10 @@ func generateTLSConfig() *tls.Config {
 		panic(err)
 	}
 
-	rawKey, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		panic(err)
-	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{{
 			Certificate: [][]byte{ca},
-			PrivateKey:  rawKey,
+			PrivateKey:  key,
 		}},
 		NextProtos: peerQuicProtocol,
 	}
