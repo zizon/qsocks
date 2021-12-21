@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"math/big"
@@ -99,10 +98,8 @@ func generateTLSConfig() *tls.Config {
 	}
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		//NotAfter:     time.Now().AddDate(99, 0, 0),
-		//DNSNames:     []string{"*"},
 	}
-	certDER, err := x509.CreateCertificate(
+	ca, err := x509.CreateCertificate(
 		rand.Reader,
 		&template,
 		&template,
@@ -112,16 +109,17 @@ func generateTLSConfig() *tls.Config {
 	if err != nil {
 		panic(err)
 	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 
-	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	rawKey, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
 		panic(err)
 	}
 	return &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		NextProtos:   peerQuicProtocol,
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{ca},
+			PrivateKey:  rawKey,
+		}},
+		NextProtos: peerQuicProtocol,
 	}
 }
 
@@ -174,8 +172,6 @@ func (s *quicStream) start() {
 		} else {
 			s.Cancle(nil)
 		}
-
-		return
 	}()
 
 	// the other direction
@@ -184,5 +180,4 @@ func (s *quicStream) start() {
 	} else {
 		s.Cancle(nil)
 	}
-	return
 }

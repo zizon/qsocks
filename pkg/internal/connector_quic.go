@@ -167,7 +167,6 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 				} else {
 					ctx.Cancle(nil)
 				}
-				return
 			}()
 
 			// drop auth request
@@ -183,8 +182,6 @@ func StartSessionLimitedSocks5RaceServer(ctx context.Context, listen, connect st
 				} else {
 					ctx.Cancle(nil)
 				}
-
-				return
 			}()
 		}
 	}()
