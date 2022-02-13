@@ -1,0 +1,28 @@
+name: build-image
+on:
+  push:
+    branches:
+      ci
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: docker
+    env:
+      REGISTRY: ghcr.io
+      IMAGE: ${{ github.repository }}:${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - run: docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE }} -f Dockerfile .
+        working-directory: ${{ env.GITHUB_WORKSPACE }}
+
+      - run: docker images
+
+      - run: echo ${{ secrets.GITHUB_TOKEN }} | docker login -u ${{ github.actor }} --password-stdin  ${{ env.REGISTRY }}
+      - run: docker push ${{ env.REGISTRY }}/${{ env.IMAGE }} 
+      - run: docker logout ${{ env.REGISTRY }}
+
+    
+        
