@@ -1,8 +1,5 @@
 name: build-image
-on:
-  push:
-    branches:
-      ci
+on: push
 
 jobs:
   build:
