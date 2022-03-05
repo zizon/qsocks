@@ -1,4 +1,4 @@
-package internal
+package logging
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ const (
 	debug
 	info
 	warn
+	error
 )
 
 var (
@@ -25,7 +26,15 @@ func SetLogLevel(level int) {
 	loglevel = level
 }
 
-func LogWarn(format string, v ...interface{}) {
+func Error(format string, v ...any) {
+	if error >= loglevel {
+		format = fmt.Sprintf("[error] %s", format)
+		msg := fmt.Sprintf(format, v...)
+		log.Output(2, msg)
+	}
+}
+
+func Warn(format string, v ...any) {
 	if warn >= loglevel {
 		format = fmt.Sprintf("[warn] %s", format)
 		msg := fmt.Sprintf(format, v...)
@@ -33,7 +42,7 @@ func LogWarn(format string, v ...interface{}) {
 	}
 }
 
-func LogInfo(format string, v ...interface{}) {
+func Info(format string, v ...any) {
 	if info >= loglevel {
 		format = fmt.Sprintf("[info] %s", format)
 		msg := fmt.Sprintf(format, v...)
@@ -41,7 +50,7 @@ func LogInfo(format string, v ...interface{}) {
 	}
 }
 
-func LogDebug(format string, v ...interface{}) {
+func Debug(format string, v ...any) {
 	if debug >= loglevel {
 		format = fmt.Sprintf("[debug] %s", format)
 		msg := fmt.Sprintf(format, v...)
@@ -49,7 +58,7 @@ func LogDebug(format string, v ...interface{}) {
 	}
 }
 
-func LogTrace(format string, v ...interface{}) {
+func Trace(format string, v ...any) {
 	if trace >= loglevel {
 		format = fmt.Sprintf("[trace] %s", format)
 		msg := fmt.Sprintf(format, v...)
