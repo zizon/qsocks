@@ -64,6 +64,8 @@ func NewServer(config Config) (Server, error) {
 }
 
 func serve(s quic.Stream) {
+	defer s.Close()
+
 	// 1. read request
 	request := &protocol.Request{}
 	if err := request.Decode(s); err != nil {
@@ -102,12 +104,12 @@ func serve(s quic.Stream) {
 	}
 
 	logging.Info("quic tcp %s -> %s", s.StreamID(), to.RemoteAddr())
+
+	// reuse goroutine
 	// one direction
-	go func() {
-		if _, err := io.Copy(s, to); err != nil {
-			logging.Warn("copy stream:%v to remote:%v fail:%v", to.RemoteAddr(), s.StreamID(), err)
-		}
-	}()
+	if _, err := io.Copy(s, to); err != nil {
+		logging.Warn("copy stream:%v to remote:%v fail:%v", to.RemoteAddr(), s.StreamID(), err)
+	}
 
 	// the other direction
 	go func() {
