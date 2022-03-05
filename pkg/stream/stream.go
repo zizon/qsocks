@@ -156,7 +156,16 @@ func drain[T any](up *state[T], apply func(T) error) {
 }
 
 func of[T any](gen func() (T, error)) *state[T] {
-	s := from(make(chan T))
+	ctx, cancle := context.WithCancel(context.TODO())
+
+	s := &state[T]{
+		Locker: &sync.Mutex{},
+
+		stream: make(chan T),
+
+		Context:    ctx,
+		CancelFunc: cancle,
+	}
 
 	go func() {
 		for {
