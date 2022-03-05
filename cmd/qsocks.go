@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zizon/qsocks/pkg/client"
@@ -41,9 +42,9 @@ func NewQsocksCommand() *cobra.Command {
 		"remote server to connect for quic, sqserver://your.server:port")
 	cmd.MarkFlagRequired("connect")
 
-	cmd.Flags().DurationVarP(&config.Timeout, "timeout", "t", 0, "timeout for connecting remote,in seconds")
+	cmd.Flags().DurationVarP(&config.Timeout, "timeout", "t", 10*time.Second, "timeout for connecting remote,in seconds")
 
-	cmd.Flags().IntVarP(&config.StreamPerSession, "streams", "s", 1, "stream per quic session")
+	cmd.Flags().IntVarP(&config.StreamPerSession, "streams", "s", 5, "stream per quic session")
 
 	return cmd
 }

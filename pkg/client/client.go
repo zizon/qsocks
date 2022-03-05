@@ -138,15 +138,24 @@ func (c *client) setupQuic(connect Config) error {
 	})
 
 	c.qsocket = stream.Flatten(sessions, func(session quic.Session) (stream.State[quic.Stream], error) {
-		limit := connect.StreamPerSession
-		return stream.Of(func() (quic.Stream, error) {
-			if limit > 0 {
-				limit -= 0
-				return session.OpenStream()
-			}
+		ch := make(chan quic.Stream)
+		go func() {
+			defer func() {
+				close(ch)
+				logging.Info("retire session:%v", session.LocalAddr())
+			}()
 
-			return nil, io.EOF
-		}), nil
+			for i := 0; i < connect.StreamPerSession; i++ {
+				s, err := session.OpenStream()
+				if err != nil {
+					logging.Error("fail to create session stream -> %v, reason:%v", session.RemoteAddr(), err)
+					return
+				}
+
+				ch <- s
+			}
+		}()
+		return stream.From(ch), nil
 	}, true)
 
 	return nil
