@@ -49,7 +49,12 @@ func NewServer(config Config) (Server, error) {
 	// accpet session sterams
 	streams := stream.Flatten(sessions, func(session quic.Session) (stream.State[quic.Stream], error) {
 		return stream.Of(func() (quic.Stream, error) {
-			return session.AcceptStream(s)
+			ss, err := session.AcceptStream(s)
+			if err != nil {
+				logging.Error("fail to accept stream from:%v rason:%v", session.RemoteAddr(), err)
+				session.CloseWithError(0, "")
+			}
+			return ss, err
 		}), nil
 	}, false)
 
@@ -102,6 +107,7 @@ func serve(s quic.Stream) {
 		logging.Error("fail to connect to:%v reason:%v", to, err)
 		return
 	}
+	defer to.Close()
 
 	logging.Info("quic tcp %s -> %s", s.StreamID(), to.RemoteAddr())
 

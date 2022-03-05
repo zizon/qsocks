@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/lucas-clemente/quic-go"
@@ -29,7 +30,13 @@ type Client interface {
 type client struct {
 	context.Context
 	socket  stream.State[net.Conn]
-	qsocket stream.State[quic.Stream]
+	qsocket stream.State[sessionStream]
+}
+
+type sessionStream struct {
+	quic.Session
+	quic.Stream
+	*sync.WaitGroup
 }
 
 func NewClient(connect Config) (Client, error) {
@@ -43,10 +50,12 @@ func NewClient(connect Config) (Client, error) {
 
 	c.setupQuic(connect)
 
-	stream.Drain(stream.Reduce(c.qsocket, c.socket, func(q quic.Stream, c net.Conn) (any, error) {
+	stream.Drain(stream.Reduce(c.qsocket, c.socket, func(q sessionStream, c net.Conn) (any, error) {
 		// local speculate
 		go func() {
 			defer c.Close()
+			defer q.Close()
+			defer q.Done()
 
 			logging.Info("conencting %v -> %v", c.RemoteAddr(), q.StreamID())
 
@@ -77,6 +86,9 @@ func NewClient(connect Config) (Client, error) {
 
 		// quic speculate
 		go func() {
+			defer c.Close()
+			defer q.Close()
+
 			if err := (&protocol.Auth{}).Decode(c); err != nil {
 				logging.Error("unkonw auth for stream:%v reaosn:%v", q.StreamID(), err)
 				return
@@ -137,11 +149,14 @@ func (c *client) setupQuic(connect Config) error {
 		}
 	})
 
-	c.qsocket = stream.Flatten(sessions, func(session quic.Session) (stream.State[quic.Stream], error) {
-		ch := make(chan quic.Stream)
+	c.qsocket = stream.Flatten(sessions, func(session quic.Session) (stream.State[sessionStream], error) {
+		ch := make(chan sessionStream)
 		go func() {
+			wg := &sync.WaitGroup{}
 			defer func() {
 				close(ch)
+				wg.Wait()
+				session.CloseWithError(0, "cleanup")
 				logging.Info("retire session:%v", session.LocalAddr())
 			}()
 
@@ -152,7 +167,12 @@ func (c *client) setupQuic(connect Config) error {
 					return
 				}
 
-				ch <- s
+				wg.Add(1)
+				ch <- sessionStream{
+					Session:   session,
+					Stream:    s,
+					WaitGroup: wg,
+				}
 			}
 		}()
 		return stream.From(ch), nil
