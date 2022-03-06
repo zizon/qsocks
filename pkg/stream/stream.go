@@ -325,7 +325,7 @@ func reduce[L any, R any, O any](left *state[L], right *state[R], apply func(L, 
 			s.abort(left.Err())
 		case <-right.Done():
 			s.abort(right.Err())
-		case <-ctx.Done():
+		case <-s.Done():
 			return
 		}
 	}()

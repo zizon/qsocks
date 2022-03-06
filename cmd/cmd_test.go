@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
+	"time"
+
 	"net/url"
 	"testing"
-	"time"
 
 	"github.com/zizon/qsocks/pkg/client"
 	"github.com/zizon/qsocks/pkg/server"
@@ -18,8 +20,8 @@ func init() {
 }
 
 func TestProtocol(t *testing.T) {
-	proxy := "127.0.0.1:10087"
-	localSocks5 := "127.0.0.1:10088"
+	proxy := "127.0.0.1:10088"
+	localSocks5 := "127.0.0.1:10089"
 	ctx, cancle := context.WithTimeout(context.TODO(), 10*time.Second)
 	defer cancle()
 
@@ -56,23 +58,33 @@ func TestProtocol(t *testing.T) {
 		},
 	}
 
-	// http request
-	if r, err := http.NewRequestWithContext(
-		ctx,
-		"GET",
-		"http://www.baidu.com",
-		nil,
-	); err != nil {
-		t.Errorf("fail to create test request:%v", err)
-		return
-	} else if resp, err := client.Do(r); err != nil {
-		t.Errorf("fail to do http proxy reqeust:%v", err)
-		return
-	} else {
-		defer resp.Body.Close()
-		t.Logf("%v", resp)
-		cancle()
+	wg := sync.WaitGroup{}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		// http request
+		go func() {
+			defer wg.Done()
+			if r, err := http.NewRequestWithContext(
+				ctx,
+				"GET",
+				"http://www.baidu.com",
+				nil,
+			); err != nil {
+				t.Errorf("fail to create test request:%v", err)
+				return
+			} else if resp, err := client.Do(r); err != nil {
+				t.Errorf("fail to do http proxy reqeust:%v", err)
+				return
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					t.Errorf("expect http:200 %v", resp.StatusCode)
+				}
+			}
+		}()
 	}
 
+	wg.Wait()
+	cancle()
 	<-ctx.Done()
 }

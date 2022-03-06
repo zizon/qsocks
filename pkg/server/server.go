@@ -26,6 +26,11 @@ type server struct {
 	context.Context
 }
 
+type sessionStream struct {
+	quic.Session
+	quic.Stream
+}
+
 func NewServer(config Config) (Server, error) {
 	// create listener
 	l, err := quic.ListenAddr(config.Listen, generateTLSConfig(), &quic.Config{
@@ -46,25 +51,29 @@ func NewServer(config Config) (Server, error) {
 		ss, err := l.Accept(s)
 		if err != nil {
 			logging.Error("fail to accept stream:%v", err)
+			l.Close()
 		}
 		return ss, err
 	})
 
 	// accpet session sterams
-	streams := stream.Flatten(sessions, func(session quic.Session) (stream.State[quic.Stream], error) {
-		return stream.Of(func() (quic.Stream, error) {
+	streams := stream.Flatten(sessions, func(session quic.Session) (stream.State[sessionStream], error) {
+		return stream.Of(func() (sessionStream, error) {
 			ss, err := session.AcceptStream(s)
 			if err != nil {
-				logging.Error("fail to accept stream from:%v rason:%v", session.RemoteAddr(), err)
+				logging.Error("fail to accept stream for session from:%v rason:%v", session.RemoteAddr(), err)
 				session.CloseWithError(0, "")
 			}
-			return ss, err
+
+			return sessionStream{
+				Session: session,
+				Stream:  ss,
+			}, err
 		}), nil
 	}, false)
 
 	// process each stream
-	stream.Drain(streams, func(s quic.Stream) error {
-		logging.Info("accept stream:%v", s.StreamID())
+	stream.Drain(streams, func(s sessionStream) error {
 		go serve(s)
 		return nil
 	})
@@ -72,13 +81,15 @@ func NewServer(config Config) (Server, error) {
 	return s, nil
 }
 
-func serve(s quic.Stream) {
+func serve(s sessionStream) {
 	defer s.Close()
+
+	logging.Info("accept stream:%v", s.remote())
 
 	// 1. read request
 	request := &protocol.Request{}
 	if err := request.Decode(s); err != nil {
-		logging.Error("unkonw request for stream:%v reaosn:%v", s, err)
+		logging.Error("unkonw request for stream:%v reaosn:%v", s.remote(), err)
 		return
 	}
 
@@ -88,6 +99,7 @@ func serve(s quic.Stream) {
 		case 0x01:
 			// connect
 			// build remote host & port
+
 			switch request.ATYP {
 			case 0x01, 0x04:
 				return fmt.Sprintf("%s:%d", net.IP(request.HOST).String(), request.PORT), nil
@@ -101,31 +113,35 @@ func serve(s quic.Stream) {
 		}
 	}()
 	if err != nil {
-		logging.Error("fail to resovle remote for stream:%v reason:%v", s, err)
+		logging.Error("fail to resovle remote for stream:%v reason:%v", s.remote(), err)
 		return
 	}
 
 	// 6. connect
-	logging.Info("try connect to:%v", addr)
+	logging.Info("try piping: %v -> %v", s.remote(), addr)
 	to, err := net.Dial("tcp", addr)
 	if err != nil {
-		logging.Error("fail to connect to:%v reason:%v", to, err)
+		logging.Error("fail piping connection %v -> %v reason:%v", s.remote(), addr, err)
 		return
 	}
 	defer to.Close()
 
-	logging.Info("quic tcp %s -> %s", s.StreamID(), to.RemoteAddr())
-
-	// the other direction
-	go func() {
-		if _, err := io.Copy(to, s); err != nil {
-			logging.Warn("copy stream:%v to remote:%v fail:%v", s.StreamID(), to.RemoteAddr(), err)
-		}
-	}()
+	logging.Info("quic pipe %v -> %v(%s)", s.remote(), addr, to.RemoteAddr())
 
 	// reuse goroutine
 	// one direction
-	if _, err := io.Copy(s, to); err != nil {
-		logging.Warn("copy stream:%v to remote:%v fail:%v", to.RemoteAddr(), s.StreamID(), err)
+	go func() {
+		if _, err := io.Copy(s, to); err != nil {
+			logging.Warn("piping %v(%v) -> %v fail:%v", addr, to.RemoteAddr(), s.remote(), err)
+		}
+	}()
+
+	// the other direction
+	if _, err := io.Copy(to, s); err != nil {
+		logging.Warn("piping %v -> %v(%v) fail:%v", s.remote(), addr, to.RemoteAddr(), err)
 	}
+}
+
+func (s *sessionStream) remote() string {
+	return fmt.Sprintf("%v[%v](%v)", s.RemoteAddr(), s.StreamID(), s.LocalAddr())
 }

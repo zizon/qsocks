@@ -57,30 +57,30 @@ func NewClient(connect Config) (Client, error) {
 			defer q.Close()
 			defer q.Done()
 
-			logging.Info("conencting %v -> %v", c.RemoteAddr(), q.StreamID())
+			logging.Info("piping %v -> %v", c.RemoteAddr(), q.remote())
 
 			// 1. auth reply
 			if err := (protocol.AuthReply{}).Encode(c); err != nil {
-				logging.Error("fail auth reply for stream reaosn:%v", err)
+				logging.Error("fail auth reply for stream:%v reaosn:%v", c.RemoteAddr(), err)
 				return
 			}
 
 			// 2. local forwrad reply
 			addr, ok := c.LocalAddr().(*net.TCPAddr)
 			if !ok {
-				logging.Error("expect addr to be tcp addr:%v", c.LocalAddr())
+				logging.Error("expect addr to be tcp addr:%v from:%v", c.LocalAddr(), c.RemoteAddr())
 				return
 			} else if err := (&protocol.Reply{
 				HOST: addr.IP,
 				PORT: addr.Port,
 			}).Encode(c); err != nil {
-				logging.Error("fail to encode reply reason:%v", err)
+				logging.Error("fail to encode reply -> %v reason:%v", c.RemoteAddr(), err)
 				return
 			}
 
 			// 3. copy
 			if _, err := io.Copy(c, q); err != nil {
-				logging.Warn("fail piping %v -> %v, reason:%v", q.StreamID(), c.RemoteAddr(), err)
+				logging.Warn("piping %v -> %v fail:%v", q.remote(), c.RemoteAddr(), err)
 			}
 		}()
 
@@ -90,13 +90,13 @@ func NewClient(connect Config) (Client, error) {
 			defer q.Close()
 
 			if err := (&protocol.Auth{}).Decode(c); err != nil {
-				logging.Error("unkonw auth for stream:%v reaosn:%v", q.StreamID(), err)
+				logging.Error("unkonw auth for stream:%v reason:%v", c.RemoteAddr(), err)
 				return
 			}
 
 			// forward reqeust and the maybe proxy content
 			if _, err := io.Copy(q, c); err != nil {
-				logging.Warn("fail piping %v -> %v, reason:%v", c.RemoteAddr(), q.StreamID(), err)
+				logging.Warn("piping %v -> %v fail:%v", c.RemoteAddr(), q.remote(), err)
 			}
 		}()
 
@@ -116,6 +116,7 @@ func (c *client) setupSocketSteram(connect Config) error {
 	c.socket = stream.Of(func() (net.Conn, error) {
 		conn, err := l.Accept()
 		if err != nil {
+			l.Close()
 			return nil, fmt.Errorf("fail accept from:%v reason:%v", l.Addr(), err)
 		}
 		return conn, nil
@@ -157,13 +158,13 @@ func (c *client) setupQuic(connect Config) error {
 				close(ch)
 				wg.Wait()
 				session.CloseWithError(0, "cleanup")
-				logging.Info("retire session:%v", session.LocalAddr())
+				logging.Info("retire session:%v limit:%v", session.LocalAddr(), connect.StreamPerSession)
 			}()
 
 			for i := 0; i < connect.StreamPerSession; i++ {
 				s, err := session.OpenStream()
 				if err != nil {
-					logging.Error("fail to create session stream -> %v, reason:%v", session.RemoteAddr(), err)
+					logging.Error("fail to create session stream:%v, reason:%v", session.LocalAddr(), err)
 					return
 				}
 
@@ -175,8 +176,13 @@ func (c *client) setupQuic(connect Config) error {
 				}
 			}
 		}()
+
 		return stream.From(ch), nil
 	}, true)
 
 	return nil
+}
+
+func (s *sessionStream) remote() string {
+	return fmt.Sprintf("%v[%v](%v)", s.RemoteAddr(), s.StreamID(), s.LocalAddr())
 }
