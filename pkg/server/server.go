@@ -43,7 +43,11 @@ func NewServer(config Config) (Server, error) {
 
 	// create sessions
 	sessions := stream.Of(func() (quic.Session, error) {
-		return l.Accept(s)
+		ss, err := l.Accept(s)
+		if err != nil {
+			logging.Error("fail to accept stream:%v", err)
+		}
+		return ss, err
 	})
 
 	// accpet session sterams
@@ -102,6 +106,7 @@ func serve(s quic.Stream) {
 	}
 
 	// 6. connect
+	logging.Info("try connect to:%v", addr)
 	to, err := net.Dial("tcp", addr)
 	if err != nil {
 		logging.Error("fail to connect to:%v reason:%v", to, err)
@@ -111,16 +116,16 @@ func serve(s quic.Stream) {
 
 	logging.Info("quic tcp %s -> %s", s.StreamID(), to.RemoteAddr())
 
-	// reuse goroutine
-	// one direction
-	if _, err := io.Copy(s, to); err != nil {
-		logging.Warn("copy stream:%v to remote:%v fail:%v", to.RemoteAddr(), s.StreamID(), err)
-	}
-
 	// the other direction
 	go func() {
 		if _, err := io.Copy(to, s); err != nil {
 			logging.Warn("copy stream:%v to remote:%v fail:%v", s.StreamID(), to.RemoteAddr(), err)
 		}
 	}()
+
+	// reuse goroutine
+	// one direction
+	if _, err := io.Copy(s, to); err != nil {
+		logging.Warn("copy stream:%v to remote:%v fail:%v", to.RemoteAddr(), s.StreamID(), err)
+	}
 }
