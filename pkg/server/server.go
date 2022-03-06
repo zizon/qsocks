@@ -58,17 +58,18 @@ func NewServer(config Config) (Server, error) {
 
 	// accpet session sterams
 	streams := stream.Flatten(sessions, func(session quic.Session) (stream.State[sessionStream], error) {
-		return stream.Of(func() (sessionStream, error) {
+		return stream.Finite(func() (sessionStream, bool) {
 			ss, err := session.AcceptStream(s)
 			if err != nil {
 				logging.Error("fail to accept stream for session from:%v rason:%v", session.RemoteAddr(), err)
 				session.CloseWithError(0, "")
+				return sessionStream{}, false
 			}
 
 			return sessionStream{
 				Session: session,
 				Stream:  ss,
-			}, err
+			}, true
 		}), nil
 	}, false)
 

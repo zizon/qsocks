@@ -37,7 +37,17 @@ func Drain[T any](up State[T], apply func(T) error) {
 }
 
 func Of[T any](gen func() (T, error)) State[T] {
-	return of(gen)
+	return of(func() (T, bool, error) {
+		v, err := gen()
+		return v, true, err
+	})
+}
+
+func Finite[T any](gen func() (T, bool)) State[T] {
+	return of(func() (T, bool, error) {
+		v, more := gen()
+		return v, more, nil
+	})
 }
 
 func Once[T any](v T) State[T] {
@@ -135,27 +145,16 @@ func drain[T any](up *state[T], apply func(T) error) {
 	}
 
 	go func() {
-		for {
-			select {
-			case v, more := <-up.stream:
-				if !more {
-					// steram clsoed is not necessary imply
-					// context is canceled
-					up.abort(up.Err())
-					return
-				}
-				if err := apply(v); err != nil {
-					up.abort(err)
-					return
-				}
-			case <-up.Done():
+		for v := range up.stream {
+			if err := apply(v); err != nil {
+				up.abort(err)
 				return
 			}
 		}
 	}()
 }
 
-func of[T any](gen func() (T, error)) *state[T] {
+func of[T any](gen func() (T, bool, error)) *state[T] {
 	ctx, cancle := context.WithCancel(context.TODO())
 
 	s := &state[T]{
@@ -168,12 +167,16 @@ func of[T any](gen func() (T, error)) *state[T] {
 	}
 
 	go func() {
+		defer close(s.stream)
 		for {
-			v, err := gen()
+			v, more, err := gen()
 			if err != nil {
 				// closing channel will eventually cancel s,
 				// so, just delegate to defe
 				s.abort(err)
+				return
+			} else if !more {
+				s.abort(nil)
 				return
 			}
 
@@ -271,15 +274,12 @@ func joinIntermidiate[T any, U any](up *state[U], intermediate *state[T], down *
 
 	for {
 		select {
-		case <-intermediate.Done():
-			if intermediate.Err() != nil {
-				down.abort(intermediate.Err())
-			}
-			return
 		case v, more := <-intermediate.stream:
 			if !more {
 				// intermedia is done.
-				intermediate.abort(nil)
+				if intermediate.Err() != nil {
+					down.abort(intermediate.Err())
+				}
 				return
 			}
 
