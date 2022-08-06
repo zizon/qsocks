@@ -8,14 +8,25 @@ dataflows are since bidirectional
 
 # Examples:
 ```shell
-Examples:
-
-start a quic proxy server
-./qsocks sqserver -l 0.0.0.0:10086
-
-start a local socks5 server listening 10086 wich connect the remote quic server
-which listen at port 10010
-./qsocks qsocks -l 0.0.0.0. -c sqserver://{address.of.quic.server}:10010
+# start proxy server at remote server
+podman run --network host \
+	ghcr.io/zizon/qsocks:master \
+	/usr/local/bin/qsocks \
+	sqserver --listen 0.0.0.0:1080
+  
+# start a local client
+# RemoteServerIP = the public accessible ip of server
+# RemoteServerPort = the port server listening on, 1080 for previous server example
+podman run --rm --name qsocks \
+	--network host \
+	ghcr.io/zizon/qsocks:master \
+	/usr/local/bin/qsocks \
+	qsocks \
+	--verbose 1 \
+	--timeout 10s \
+	--listen 127.0.0.1:1080 \
+	--streams 5 \
+	--connect sqserver://${RemoteServerIP}:${RemoteServerPort}
 ```
 
 # Issue
