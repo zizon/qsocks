@@ -34,7 +34,7 @@ type client struct {
 }
 
 type sessionStream struct {
-	quic.Session
+	quic.Connection
 	quic.Stream
 	*sync.WaitGroup
 }
@@ -126,7 +126,7 @@ func (c *client) setupSocketSteram(connect Config) error {
 }
 
 func (c *client) setupQuic(connect Config) error {
-	sessions := stream.Of(func() (quic.Session, error) {
+	sessions := stream.Of(func() (quic.Connection, error) {
 		for {
 			session, err := quic.DialAddrEarly(connect.Connect,
 				&tls.Config{
@@ -136,7 +136,6 @@ func (c *client) setupQuic(connect Config) error {
 				&quic.Config{
 					HandshakeIdleTimeout: connect.Timeout,
 					MaxIdleTimeout:       connect.Timeout,
-					KeepAlive:            true,
 					EnableDatagrams:      true,
 				},
 			)
@@ -150,7 +149,7 @@ func (c *client) setupQuic(connect Config) error {
 		}
 	})
 
-	c.qsocket = stream.Flatten(sessions, func(session quic.Session) (stream.State[sessionStream], error) {
+	c.qsocket = stream.Flatten(sessions, func(session quic.Connection) (stream.State[sessionStream], error) {
 		ch := make(chan sessionStream)
 		go func() {
 			wg := &sync.WaitGroup{}
@@ -170,9 +169,9 @@ func (c *client) setupQuic(connect Config) error {
 
 				wg.Add(1)
 				ch <- sessionStream{
-					Session:   session,
-					Stream:    s,
-					WaitGroup: wg,
+					Connection: session,
+					Stream:     s,
+					WaitGroup:  wg,
 				}
 			}
 		}()

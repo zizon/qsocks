@@ -27,7 +27,7 @@ type server struct {
 }
 
 type sessionStream struct {
-	quic.Session
+	quic.Connection
 	quic.Stream
 }
 
@@ -47,7 +47,7 @@ func NewServer(config Config) (Server, error) {
 	}
 
 	// create sessions
-	sessions := stream.Of(func() (quic.Session, error) {
+	sessions := stream.Of(func() (quic.Connection, error) {
 		ss, err := l.Accept(s)
 		if err != nil {
 			logging.Error("fail to accept stream:%v", err)
@@ -57,7 +57,7 @@ func NewServer(config Config) (Server, error) {
 	})
 
 	// accpet session sterams
-	streams := stream.Flatten(sessions, func(session quic.Session) (stream.State[sessionStream], error) {
+	streams := stream.Flatten(sessions, func(session quic.Connection) (stream.State[sessionStream], error) {
 		return stream.Finite(func() (sessionStream, bool) {
 			ss, err := session.AcceptStream(s)
 			if err != nil {
@@ -67,8 +67,8 @@ func NewServer(config Config) (Server, error) {
 			}
 
 			return sessionStream{
-				Session: session,
-				Stream:  ss,
+				Connection: session,
+				Stream:     ss,
 			}, true
 		}), nil
 	}, false)
