@@ -34,8 +34,8 @@ type sessionStream struct {
 func NewServer(config Config) (Server, error) {
 	// create listener
 	l, err := quic.ListenAddr(config.Listen, generateTLSConfig(), &quic.Config{
-		MaxIdleTimeout:  30 * time.Second,
 		EnableDatagrams: true,
+		KeepAlivePeriod: 5 * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fail to create quic listener:%v", err)

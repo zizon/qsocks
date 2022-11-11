@@ -135,7 +135,6 @@ func (c *client) setupQuic(connect Config) error {
 				},
 				&quic.Config{
 					HandshakeIdleTimeout: connect.Timeout,
-					MaxIdleTimeout:       connect.Timeout,
 					EnableDatagrams:      true,
 					KeepAlivePeriod:      connect.Timeout,
 				},
