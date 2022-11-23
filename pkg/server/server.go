@@ -10,19 +10,15 @@ import (
 	"github.com/lucas-clemente/quic-go"
 	"github.com/zizon/qsocks/pkg/logging"
 	"github.com/zizon/qsocks/pkg/protocol"
-	"github.com/zizon/qsocks/pkg/stream"
 )
 
 type Config struct {
 	context.Context
+	context.CancelFunc
 	Listen string
 }
 
 type Server interface {
-	context.Context
-}
-
-type server struct {
 	context.Context
 }
 
@@ -42,48 +38,45 @@ func NewServer(config Config) (Server, error) {
 	}
 	logging.Info("listening %v", l.Addr())
 
-	s := &server{
-		Context: config,
-	}
-
-	// create sessions
-	sessions := stream.Of(func() (quic.Connection, error) {
-		ss, err := l.Accept(s)
-		if err != nil {
-			logging.Error("fail to accept stream:%v", err)
-			l.Close()
-		}
-		return ss, err
-	})
-
-	// accpet session sterams
-	streams := stream.Flatten(sessions, func(session quic.Connection) (stream.State[sessionStream], error) {
-		return stream.Finite(func() (sessionStream, bool) {
-			ss, err := session.AcceptStream(s)
-			if err != nil {
-				logging.Error("fail to accept stream for session from:%v rason:%v", session.RemoteAddr(), err)
-				session.CloseWithError(0, "")
-				return sessionStream{}, false
+	go func() {
+		defer func() {
+			if err := l.Close(); err != nil {
+				logging.Warn("fail close listener:%v", err)
 			}
 
-			return sessionStream{
-				Connection: session,
-				Stream:     ss,
-			}, true
-		}), nil
-	}, false)
+			config.CancelFunc()
+		}()
 
-	// process each stream
-	stream.Drain(streams, func(s sessionStream) error {
-		go serve(s)
-		return nil
-	})
+		for {
+			c, err := l.Accept(config)
+			if err != nil {
+				logging.Error("fail to accept stream:%v abort listening", err)
+				return
+			}
 
-	return s, nil
+			go func() {
+				defer c.CloseWithError(0, "close connection")
+				for {
+					stream, err := c.AcceptStream(config)
+					if err != nil {
+						logging.Error("fail to accept stream for session from:%v rason:%v", c.RemoteAddr(), err)
+						return
+					}
+
+					go serve(sessionStream{
+						Connection: c,
+						Stream:     stream,
+					})
+				}
+			}()
+		}
+	}()
+
+	return config, nil
 }
 
 func serve(s sessionStream) {
-	defer s.Close()
+	defer s.Stream.Close()
 
 	logging.Info("accept stream:%v", s.remote())
 
@@ -100,7 +93,6 @@ func serve(s sessionStream) {
 		case 0x01:
 			// connect
 			// build remote host & port
-
 			switch request.ATYP {
 			case 0x01, 0x04:
 				return fmt.Sprintf("%s:%d", net.IP(request.HOST).String(), request.PORT), nil

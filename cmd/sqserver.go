@@ -9,8 +9,10 @@ import (
 )
 
 func NewSqserverCommand() *cobra.Command {
+	ctx, cancler := context.WithCancel(context.TODO())
 	config := server.Config{
-		Context: context.TODO(),
+		Context:    ctx,
+		CancelFunc: cancler,
 	}
 
 	// sqsocks
