@@ -26,23 +26,30 @@ func TestProtocol(t *testing.T) {
 	defer cancle()
 
 	// socks5 client
-	if _, err := client.NewClient(client.Config{
-		Context:          ctx,
-		Connect:          proxy,
-		Listen:           localSocks5,
-		StreamPerSession: 5,
-	}); err != nil {
-		t.Errorf("fail to create client:%v", err)
-		return
-	}
+	go func() {
+		if err := client.Run(client.Config{
+			Context:          ctx,
+			CancelFunc:       cancle,
+			Connect:          proxy,
+			Listen:           localSocks5,
+			StreamPerSession: 5,
+		}); err != nil {
+			panic(fmt.Sprintf("fail to create client:%v", err))
+		}
+	}()
 
 	// socks5 server
-	if _, err := server.NewServer(server.Config{
-		Context: ctx,
-		Listen:  proxy,
-	}); err != nil {
-		t.Errorf("fail to create server:%v", err)
-	}
+	go func() {
+		if err := server.Run(server.Config{
+			Context:    ctx,
+			CancelFunc: cancle,
+			Listen:     proxy,
+		}); err != nil {
+			t.Errorf("fail to create server:%v", err)
+		}
+	}()
+
+	<-time.After(2 * time.Second)
 
 	// http client
 	client := http.Client{

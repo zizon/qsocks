@@ -28,13 +28,7 @@ func NewQsocksCommand() *cobra.Command {
 			}
 			config.Connect = parsed.Host
 
-			c, err := client.NewClient(config)
-			if err != nil {
-				return fmt.Errorf("fail to ceate local socks5 server:%v", err)
-			}
-			<-c.Done()
-
-			return c.Err()
+			return client.Run(config)
 		},
 	}
 
