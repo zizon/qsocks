@@ -11,8 +11,10 @@ import (
 )
 
 func NewQsocksCommand() *cobra.Command {
+	ctx, cancle := context.WithCancel(context.TODO())
 	config := client.Config{
-		Context: context.TODO(),
+		Context:    ctx,
+		CancelFunc: cancle,
 	}
 
 	// qsocks
