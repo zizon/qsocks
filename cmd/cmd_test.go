@@ -30,7 +30,7 @@ func TestProtocol(t *testing.T) {
 		if err := client.Run(client.Config{
 			Context:          ctx,
 			CancelFunc:       cancle,
-			Connect:          proxy,
+			Connect:          []string{proxy},
 			Listen:           localSocks5,
 			StreamPerSession: 5,
 		}); err != nil {

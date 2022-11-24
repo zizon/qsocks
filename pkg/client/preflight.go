@@ -13,7 +13,7 @@ import (
 
 type preflight struct {
 	context.Context
-	target     string
+	target     []string
 	timeout    time.Duration
 	maxStreams int
 }
@@ -31,6 +31,7 @@ func (p preflight) create() <-chan quic.Stream {
 	go func() {
 		defer close(ch)
 
+		selected := 0
 		for {
 			// in case of termination
 			select {
@@ -41,7 +42,7 @@ func (p preflight) create() <-chan quic.Stream {
 			}
 
 			// create session
-			c, err := quic.DialAddrEarly(p.target,
+			c, err := quic.DialAddrEarly(p.target[selected%len(p.target)],
 				&tls.Config{
 					InsecureSkipVerify: true,
 					NextProtos:         protocol.PeerQuicProtocol,
@@ -53,7 +54,8 @@ func (p preflight) create() <-chan quic.Stream {
 				},
 			)
 			if err != nil {
-				logging.Warn("fail to create quic session:%v", err)
+				logging.Warn("fail to create quic session to%v reason:%v", p.target[selected%len(p.target)], err)
+				selected = (selected + 1) % len(p.target)
 				continue
 			}
 

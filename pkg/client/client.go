@@ -9,7 +9,7 @@ type Config struct {
 	context.Context
 	context.CancelFunc
 	Listen           string
-	Connect          string
+	Connect          []string
 	Timeout          time.Duration
 	StreamPerSession int
 }

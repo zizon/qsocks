@@ -22,11 +22,14 @@ func NewQsocksCommand() *cobra.Command {
 		Use:   "qsocks",
 		Short: "start a local socks5 server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			parsed, err := url.Parse(config.Connect)
-			if err != nil {
-				return fmt.Errorf("fail to parse quic server:%v", err)
+			for i, conn := range config.Connect {
+				parsed, err := url.Parse(conn)
+				if err != nil {
+					return fmt.Errorf("fail to parse quic server:%v", err)
+				}
+
+				config.Connect[i] = parsed.Host
 			}
-			config.Connect = parsed.Host
 
 			return client.Run(config)
 		},
@@ -34,7 +37,7 @@ func NewQsocksCommand() *cobra.Command {
 
 	cmd.Flags().StringVarP(&config.Listen, "listen", "l", "0.0.0.0:10086", "local socks5 listening  address")
 
-	cmd.Flags().StringVarP(&config.Connect, "connect", "c", "",
+	cmd.Flags().StringArrayVarP(&config.Connect, "connect", "c", []string{},
 		"remote server to connect for quic, sqserver://your.server:port")
 	cmd.MarkFlagRequired("connect")
 
