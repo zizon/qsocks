@@ -12,10 +12,12 @@ import (
 
 type tunnel struct {
 	from net.Conn
+	toCh <-chan quic.Stream
 	to   quic.Stream
 }
 
 func (t tunnel) serve() {
+	t.to = <-t.toCh
 	logging.Info("tunnel:%v created", t)
 	if t.to == nil {
 		t.close(fmt.Sprintf("no quic stream bound, invalid tunnel:%v", t))

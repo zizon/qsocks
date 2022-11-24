@@ -32,7 +32,7 @@ func Run(config Config) error {
 		for c := range localCh {
 			go tunnel{
 				from: c,
-				to:   <-streamCh,
+				toCh: streamCh,
 			}.serve()
 		}
 	}()
