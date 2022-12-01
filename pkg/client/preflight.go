@@ -20,7 +20,7 @@ type preflight struct {
 
 type quicConnection struct {
 	context.Context
-	quic.EarlyConnection
+	quic.Connection
 	maxStreams int
 	ready      chan<- quic.Stream
 }
@@ -42,7 +42,7 @@ func (p preflight) create() <-chan quic.Stream {
 			}
 
 			// create session
-			c, err := quic.DialAddrEarly(p.target[selected%len(p.target)],
+			c, err := quic.DialAddr(p.target[selected%len(p.target)],
 				&tls.Config{
 					InsecureSkipVerify: true,
 					NextProtos:         protocol.PeerQuicProtocol,
@@ -61,10 +61,10 @@ func (p preflight) create() <-chan quic.Stream {
 
 			// serve connection
 			quicConnection{
-				Context:         p.Context,
-				EarlyConnection: c,
-				maxStreams:      p.maxStreams,
-				ready:           ch,
+				Context:    p.Context,
+				Connection: c,
+				maxStreams: p.maxStreams,
+				ready:      ch,
 			}.serve()
 		}
 	}()
