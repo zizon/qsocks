@@ -57,7 +57,8 @@ func (p preflight) toHost(host string, ch chan<- quic.Stream) {
 		}
 
 		// create session
-		c, err := quic.DialAddr(
+		c, err := quic.DialAddrEarlyContext(
+			p,
 			host,
 			&tls.Config{
 				InsecureSkipVerify: true,
@@ -70,7 +71,7 @@ func (p preflight) toHost(host string, ch chan<- quic.Stream) {
 			},
 		)
 		if err != nil {
-			logging.Warn("fail to create quic session to%v reason:%v", host, err)
+			logging.Warn("fail to create quic session to %v reason:%v", host, err)
 			continue
 		}
 
