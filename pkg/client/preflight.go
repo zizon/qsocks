@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/lucas-clemente/quic-go"
@@ -28,48 +29,59 @@ type quicConnection struct {
 func (p preflight) create() <-chan quic.Stream {
 	ch := make(chan quic.Stream)
 
+	wg := sync.WaitGroup{}
+	for _, host := range p.target {
+		wg.Add(1)
+		go func(host string) {
+			defer wg.Done()
+			p.toHost(host, ch)
+		}(host)
+	}
+
 	go func() {
 		defer close(ch)
-
-		selected := 0
-		for {
-			// in case of termination
-			select {
-			case <-p.Done():
-				logging.Info("stop preflight:%v", p.Err())
-				return
-			default:
-			}
-
-			// create session
-			c, err := quic.DialAddr(p.target[selected%len(p.target)],
-				&tls.Config{
-					InsecureSkipVerify: true,
-					NextProtos:         protocol.PeerQuicProtocol,
-				},
-				&quic.Config{
-					HandshakeIdleTimeout: p.timeout,
-					EnableDatagrams:      true,
-					KeepAlivePeriod:      p.timeout,
-				},
-			)
-			if err != nil {
-				logging.Warn("fail to create quic session to%v reason:%v", p.target[selected%len(p.target)], err)
-				selected = (selected + 1) % len(p.target)
-				continue
-			}
-
-			// serve connection
-			quicConnection{
-				Context:    p.Context,
-				Connection: c,
-				maxStreams: p.maxStreams,
-				ready:      ch,
-			}.serve()
-		}
+		wg.Wait()
 	}()
 
 	return ch
+}
+
+func (p preflight) toHost(host string, ch chan<- quic.Stream) {
+	for {
+		// in case of termination
+		select {
+		case <-p.Done():
+			logging.Info("stop preflight:%v", p.Err())
+			return
+		default:
+		}
+
+		// create session
+		c, err := quic.DialAddr(
+			host,
+			&tls.Config{
+				InsecureSkipVerify: true,
+				NextProtos:         protocol.PeerQuicProtocol,
+			},
+			&quic.Config{
+				HandshakeIdleTimeout: p.timeout,
+				EnableDatagrams:      true,
+				KeepAlivePeriod:      p.timeout,
+			},
+		)
+		if err != nil {
+			logging.Warn("fail to create quic session to%v reason:%v", host, err)
+			continue
+		}
+
+		// serve connection
+		quicConnection{
+			Context:    p.Context,
+			Connection: c,
+			maxStreams: p.maxStreams,
+			ready:      ch,
+		}.serve()
+	}
 }
 
 func (c quicConnection) serve() {
