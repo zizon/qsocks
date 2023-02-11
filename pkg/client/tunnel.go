@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/lucas-clemente/quic-go"
+	"github.com/quic-go/quic-go"
 	"github.com/zizon/qsocks/pkg/logging"
 	"github.com/zizon/qsocks/pkg/protocol"
 )
