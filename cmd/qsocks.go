@@ -45,5 +45,7 @@ func NewQsocksCommand() *cobra.Command {
 
 	cmd.Flags().IntVarP(&config.StreamPerSession, "streams", "s", 5, "stream per quic session")
 
+	cmd.Flags().BoolVarP(&config.Async, "async", "", false, "enable 0rtt connection")
+
 	return cmd
 }

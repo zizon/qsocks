@@ -19,7 +19,7 @@ func Run(config Config) error {
 	defer config.CancelFunc()
 
 	// create listener
-	l, err := quic.ListenAddr(config.Listen, generateTLSConfig(), &quic.Config{
+	l, err := quic.ListenAddrEarly(config.Listen, generateTLSConfig(), &quic.Config{
 		EnableDatagrams: true,
 		KeepAlivePeriod: 5 * time.Second,
 	})

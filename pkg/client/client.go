@@ -12,6 +12,7 @@ type Config struct {
 	Connect          []string
 	Timeout          time.Duration
 	StreamPerSession int
+	Async            bool
 }
 
 func Run(config Config) error {
@@ -20,6 +21,7 @@ func Run(config Config) error {
 		target:     config.Connect,
 		timeout:    config.Timeout,
 		maxStreams: config.StreamPerSession,
+		async:      config.Async,
 	}.create()
 
 	localCh := local{

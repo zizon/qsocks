@@ -36,7 +36,7 @@ func (l local) create() <-chan net.Conn {
 			case ch <- c:
 			case <-l.Done():
 				c.Close()
-				logging.Info("parent context terminated, stop listening:%v", l.listen, err)
+				logging.Info("parent context terminated, stop listening:%v", l.listen, l.Err())
 				return
 			}
 		}

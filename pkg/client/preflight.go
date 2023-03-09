@@ -17,10 +17,10 @@ type preflight struct {
 	target     []string
 	timeout    time.Duration
 	maxStreams int
+	async      bool
 }
 
 type quicConnection struct {
-	context.Context
 	quic.Connection
 	maxStreams int
 	ready      chan<- quic.Stream
@@ -34,7 +34,7 @@ func (p preflight) create() <-chan quic.Stream {
 		wg.Add(1)
 		go func(host string) {
 			defer wg.Done()
-			p.toHost(host, ch)
+			p.generate(host, ch)
 		}(host)
 	}
 
@@ -46,7 +46,7 @@ func (p preflight) create() <-chan quic.Stream {
 	return ch
 }
 
-func (p preflight) toHost(host string, ch chan<- quic.Stream) {
+func (p preflight) generate(host string, ch chan<- quic.Stream) {
 	for {
 		// in case of termination
 		select {
@@ -57,19 +57,35 @@ func (p preflight) toHost(host string, ch chan<- quic.Stream) {
 		}
 
 		// create session
-		c, err := quic.DialAddrEarlyContext(
-			p,
-			host,
-			&tls.Config{
-				InsecureSkipVerify: true,
-				NextProtos:         protocol.PeerQuicProtocol,
-			},
-			&quic.Config{
-				HandshakeIdleTimeout: p.timeout,
-				EnableDatagrams:      true,
-				KeepAlivePeriod:      p.timeout,
-			},
-		)
+		c, err := func() (quic.Connection, error) {
+			if p.async {
+				return quic.DialAddrEarlyContext(
+					p,
+					host,
+					&tls.Config{
+						InsecureSkipVerify: true,
+						NextProtos:         protocol.PeerQuicProtocol,
+					},
+					&quic.Config{
+						HandshakeIdleTimeout: p.timeout,
+						EnableDatagrams:      true,
+						KeepAlivePeriod:      p.timeout,
+					})
+			}
+			return quic.DialAddrContext(
+				p,
+				host,
+				&tls.Config{
+					InsecureSkipVerify: true,
+					NextProtos:         protocol.PeerQuicProtocol,
+				},
+				&quic.Config{
+					HandshakeIdleTimeout: p.timeout,
+					EnableDatagrams:      true,
+					KeepAlivePeriod:      p.timeout,
+				},
+			)
+		}()
 		if err != nil {
 			logging.Warn("fail to create quic session to %v reason:%v", host, err)
 			continue
@@ -77,7 +93,6 @@ func (p preflight) toHost(host string, ch chan<- quic.Stream) {
 
 		// serve connection
 		quicConnection{
-			Context:    p.Context,
 			Connection: c,
 			maxStreams: p.maxStreams,
 			ready:      ch,
@@ -103,7 +118,7 @@ func (c quicConnection) serve() {
 		// then push ready one
 		select {
 		case c.ready <- s:
-		case <-c.Done():
+		case <-c.Context().Done():
 			// parent terminated
 			c.close(fmt.Sprintf("destroy quic connection:%v as parent die:%v", c, err))
 			return
